@@ -190,7 +190,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     redirect('?page=create_match&err=season_mismatch');
   }
 
-  // adversário inferido automaticamente
+  // adversário inferido automaticamente (sem campo redundante)
   $oppClub = $isHomePal ? $away : $home;
 
   // precisa ter pelo menos 1 do Palmeiras e 1 do adversário
@@ -207,7 +207,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     redirect('?page=create_match&err=roster_required');
   }
 
-  // NÃO permitir mesmo jogador do Palmeiras duplicado
+  /**
+   * ==========================================================
+   * VALIDAÇÃO: NÃO PERMITIR MESMO JOGADOR DO PALMEIRAS 2x
+   * ==========================================================
+   */
   $palSeen = [];
 
   for ($i=0; $i<$MAX_STARTERS; $i++) {
@@ -230,34 +234,24 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     $palSeen[$pid] = true;
   }
 
-  // Detecta colunas do match_players (para montar INSERT correto)
-  $mpCols = [];
-  $stCols = $pdo->query("PRAGMA table_info(match_players)");
-  foreach ($stCols->fetchAll(PDO::FETCH_ASSOC) as $r) $mpCols[(string)$r['name']] = true;
+  // --- helper: detectar colunas (para compatibilidade com schema atual) ---
+  $tableCols = [];
+  $hasCol = function(string $table, string $col) use ($pdo, &$tableCols): bool {
+    if (!isset($tableCols[$table])) {
+      $tableCols[$table] = [];
+      $st = $pdo->query("PRAGMA table_info($table)");
+      foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $tableCols[$table][(string)$r['name']] = true;
+      }
+    }
+    return isset($tableCols[$table][$col]);
+  };
 
-  $mpHasOppId = isset($mpCols['opponent_player_id']);
-  $mpHasType  = isset($mpCols['player_type']);
+  $mp_has_opp  = $hasCol('match_players', 'opponent_player_id');
+  $mp_has_type = $hasCol('match_players', 'player_type');
 
-  // Garante tabela de stats do adversário (Caminho B)
-  $pdo->exec("
-    CREATE TABLE IF NOT EXISTS opponent_match_player_stats (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      match_id INTEGER NOT NULL,
-      club_name TEXT NOT NULL,
-      opponent_player_id INTEGER NOT NULL,
-      goals_for INTEGER NOT NULL DEFAULT 0,
-      goals_against INTEGER NOT NULL DEFAULT 0,
-      assists INTEGER NOT NULL DEFAULT 0,
-      yellow_cards INTEGER NOT NULL DEFAULT 0,
-      red_cards INTEGER NOT NULL DEFAULT 0,
-      rating REAL NOT NULL DEFAULT 0,
-      motm INTEGER NOT NULL DEFAULT 0,
-      FOREIGN KEY(match_id) REFERENCES matches(id) ON DELETE CASCADE,
-      FOREIGN KEY(opponent_player_id) REFERENCES opponent_players(id) ON DELETE RESTRICT
-    );
-  ");
-  $pdo->exec("CREATE INDEX IF NOT EXISTS idx_omps_match ON opponent_match_player_stats(match_id)");
-  $pdo->exec("CREATE INDEX IF NOT EXISTS idx_omps_player ON opponent_match_player_stats(opponent_player_id)");
+  $mps_has_opp  = $hasCol('match_player_stats', 'opponent_player_id');
+  $mps_has_type = $hasCol('match_player_stats', 'player_type');
 
   $pdo->beginTransaction();
   try {
@@ -279,38 +273,89 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 
     $matchId = (int)$pdo->lastInsertId();
 
-    // match_players: monta conforme schema real
-    if ($mpHasOppId && $mpHasType) {
+    // match_players: prepara conforme schema (FKs)
+    if ($mp_has_opp && $mp_has_type) {
       $insMatchPlayer = $pdo->prepare("
         INSERT INTO match_players(match_id, club_name, player_id, opponent_player_id, role, position, sort_order, entered, player_type)
         VALUES (?,?,?,?,?,?,?,?,?)
       ");
-    } elseif ($mpHasOppId) {
+    } elseif ($mp_has_opp) {
       $insMatchPlayer = $pdo->prepare("
         INSERT INTO match_players(match_id, club_name, player_id, opponent_player_id, role, position, sort_order, entered)
         VALUES (?,?,?,?,?,?,?,?)
       ");
     } else {
+      // schema antigo (sem opponent_player_id)
       $insMatchPlayer = $pdo->prepare("
         INSERT INTO match_players(match_id, club_name, player_id, role, position, sort_order, entered)
         VALUES (?,?,?,?,?,?,?)
       ");
     }
 
-    // stats do Palmeiras (tabela existente)
-    $insStatsPal = $pdo->prepare("
-      INSERT INTO match_player_stats(match_id, club_name, player_id, goals_for, goals_against, assists, yellow_cards, red_cards, rating, motm)
-      VALUES (?,?,?,?,?,?,?,?,?,?)
-    ");
+    // match_player_stats: prepara conforme schema
+    if ($mps_has_opp && $mps_has_type) {
+      $insStats = $pdo->prepare("
+        INSERT INTO match_player_stats(match_id, club_name, player_id, opponent_player_id, goals_for, goals_against, assists, yellow_cards, red_cards, rating, motm, player_type)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      ");
+    } elseif ($mps_has_opp) {
+      $insStats = $pdo->prepare("
+        INSERT INTO match_player_stats(match_id, club_name, player_id, opponent_player_id, goals_for, goals_against, assists, yellow_cards, red_cards, rating, motm)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+      ");
+    } else {
+      // schema antigo
+      $insStats = $pdo->prepare("
+        INSERT INTO match_player_stats(match_id, club_name, player_id, goals_for, goals_against, assists, yellow_cards, red_cards, rating, motm)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+      ");
+    }
 
-    // stats do adversário (tabela nova)
-    $insStatsOpp = $pdo->prepare("
-      INSERT INTO opponent_match_player_stats(match_id, club_name, opponent_player_id, goals_for, goals_against, assists, yellow_cards, red_cards, rating, motm)
-      VALUES (?,?,?,?,?,?,?,?,?,?)
-    ");
+    // --- helpers de insert para evitar FK errada ---
+    $insMpPal = function(int $pid, string $dbRole, string $pos, int $sort, int $entered) use ($insMatchPlayer, $matchId, $club, $mp_has_opp, $mp_has_type): void {
+      if ($mp_has_opp && $mp_has_type) {
+        $insMatchPlayer->execute([$matchId, $club, $pid, null, $dbRole, $pos, $sort, $entered, 'HOME']);
+      } elseif ($mp_has_opp) {
+        $insMatchPlayer->execute([$matchId, $club, $pid, null, $dbRole, $pos, $sort, $entered]);
+      } else {
+        $insMatchPlayer->execute([$matchId, $club, $pid, $dbRole, $pos, $sort, $entered]);
+      }
+    };
+
+    $insMpOpp = function(int $oppPid, string $dbRole, string $pos, int $sort, int $entered) use ($insMatchPlayer, $matchId, $oppClub, $mp_has_opp, $mp_has_type): void {
+      if ($mp_has_opp && $mp_has_type) {
+        $insMatchPlayer->execute([$matchId, $oppClub, null, $oppPid, $dbRole, $pos, $sort, $entered, 'AWAY']);
+      } elseif ($mp_has_opp) {
+        $insMatchPlayer->execute([$matchId, $oppClub, null, $oppPid, $dbRole, $pos, $sort, $entered]);
+      } else {
+        // schema antigo: sem coluna própria p/ adversário (não deveria acontecer no seu DB atual)
+        $insMatchPlayer->execute([$matchId, $oppClub, $oppPid, $dbRole, $pos, $sort, $entered]);
+      }
+    };
+
+    $insStPal = function(int $pid, int $g, int $og, int $a, int $y, int $r, float $rating) use ($insStats, $matchId, $club, $mps_has_opp, $mps_has_type): void {
+      if ($mps_has_opp && $mps_has_type) {
+        $insStats->execute([$matchId, $club, $pid, null, $g, $og, $a, $y, $r, $rating, 0, 'HOME']);
+      } elseif ($mps_has_opp) {
+        $insStats->execute([$matchId, $club, $pid, null, $g, $og, $a, $y, $r, $rating, 0]);
+      } else {
+        $insStats->execute([$matchId, $club, $pid, $g, $og, $a, $y, $r, $rating, 0]);
+      }
+    };
+
+    $insStOpp = function(int $oppPid, int $g, int $og, int $a, int $y, int $r, float $rating) use ($insStats, $matchId, $oppClub, $mps_has_opp, $mps_has_type): void {
+      if ($mps_has_opp && $mps_has_type) {
+        $insStats->execute([$matchId, $oppClub, null, $oppPid, $g, $og, $a, $y, $r, $rating, 0, 'AWAY']);
+      } elseif ($mps_has_opp) {
+        $insStats->execute([$matchId, $oppClub, null, $oppPid, $g, $og, $a, $y, $r, $rating, 0]);
+      } else {
+        // schema antigo
+        $insStats->execute([$matchId, $oppClub, $oppPid, $g, $og, $a, $y, $r, $rating, 0]);
+      }
+    };
 
     // Palmeiras
-    $savePal = function(string $role, int $max) use ($club, $matchId, $insMatchPlayer, $insStatsPal, $positions, $mpHasOppId, $mpHasType): void {
+    $savePal = function(string $role, int $max) use ($positions, $insMpPal, $insStPal): void {
       for ($i=0; $i<$max; $i++) {
         $pid = (int)($_POST["pal_pid_{$role}_{$i}"] ?? 0);
         if ($pid <= 0) continue;
@@ -328,28 +373,19 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         $entered = ($role === 'starter') ? 1 : 0;
         $dbRole  = ($role === 'starter') ? 'STARTER' : 'BENCH';
 
-        // match_players: Palmeiras sempre em player_id
-        if ($mpHasOppId && $mpHasType) {
-          $insMatchPlayer->execute([$matchId, $club, $pid, null, $dbRole, $pos, $i+1, $entered, 'HOME']);
-        } elseif ($mpHasOppId) {
-          $insMatchPlayer->execute([$matchId, $club, $pid, null, $dbRole, $pos, $i+1, $entered]);
-        } else {
-          $insMatchPlayer->execute([$matchId, $club, $pid, $dbRole, $pos, $i+1, $entered]);
-        }
-
-        // stats Palmeiras
-        $insStatsPal->execute([$matchId, $club, $pid, $g, $og, $a, $y, $r, $rating, 0]);
+        $insMpPal($pid, $dbRole, $pos, $i+1, $entered);
+        $insStPal($pid, $g, $og, $a, $y, $r, $rating);
       }
     };
 
-    // Adversário (cria em opponent_players se não existir) - SEM secondary_positions
+    // Adversário (cria em opponent_players se não existir)
     $findOppPlayer = $pdo->prepare("SELECT id FROM opponent_players WHERE club_name = ? AND name = ? LIMIT 1");
     $insOppPlayer  = $pdo->prepare("
       INSERT INTO opponent_players (club_name, name, primary_position, is_active, created_at, updated_at)
       VALUES (?, ?, ?, 1, datetime('now'), datetime('now'))
     ");
 
-    $saveOpp = function(string $role, int $max) use ($oppClub, $matchId, $insMatchPlayer, $insStatsOpp, $positions, $findOppPlayer, $insOppPlayer, $pdo, $mpHasOppId, $mpHasType): void {
+    $saveOpp = function(string $role, int $max) use ($positions, $oppClub, $pdo, $findOppPlayer, $insOppPlayer, $insMpOpp, $insStOpp): void {
       for ($i=0; $i<$max; $i++) {
         $name = trim((string)($_POST["opp_name_{$role}_{$i}"] ?? ''));
         if ($name === '') continue;
@@ -361,10 +397,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         $row = $findOppPlayer->fetch(PDO::FETCH_ASSOC);
 
         if ($row && isset($row['id'])) {
-          $oppPid = (int)$row['id'];
+          $pid = (int)$row['id'];
         } else {
           $insOppPlayer->execute([$oppClub, $name, $pos]);
-          $oppPid = (int)$pdo->lastInsertId();
+          $pid = (int)$pdo->lastInsertId();
         }
 
         $rating = num0($_POST["opp_rating_{$role}_{$i}"] ?? '');
@@ -377,18 +413,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         $entered = ($role === 'starter') ? 1 : 0;
         $dbRole  = ($role === 'starter') ? 'STARTER' : 'BENCH';
 
-        // match_players: adversário sempre em opponent_player_id
-        if ($mpHasOppId && $mpHasType) {
-          $insMatchPlayer->execute([$matchId, $oppClub, null, $oppPid, $dbRole, $pos, $i+1, $entered, 'AWAY']);
-        } elseif ($mpHasOppId) {
-          $insMatchPlayer->execute([$matchId, $oppClub, null, $oppPid, $dbRole, $pos, $i+1, $entered]);
-        } else {
-          // fallback (não esperado no seu schema atual)
-          $insMatchPlayer->execute([$matchId, $oppClub, $oppPid, $dbRole, $pos, $i+1, $entered]);
-        }
-
-        // stats adversário -> tabela nova
-        $insStatsOpp->execute([$matchId, $oppClub, $oppPid, $g, $og, $a, $y, $r, $rating, 0]);
+        $insMpOpp($pid, $dbRole, $pos, $i+1, $entered);
+        $insStOpp($pid, $g, $og, $a, $y, $r, $rating);
       }
     };
 
@@ -449,7 +475,6 @@ if ($err === 'invalid') {
   echo '<div class="alert alert-success card-soft">Partida cadastrada com sucesso.</div>';
 }
 
-// CSS original (mantém layout/tamanho conforme seu antigo)
 echo <<<HTML
 <style>
 /* ===== Create Match: alinhamento + responsivo ===== */
