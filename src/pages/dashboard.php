@@ -3,7 +3,12 @@ declare(strict_types=1);
 $pdo = db();
 
 $games = (int)scalar($pdo, "SELECT COUNT(*) FROM matches");
-$players = (int)scalar($pdo, "SELECT COUNT(*) FROM players WHERE is_active=1");
+#$players = (int)scalar($pdo, "SELECT COUNT(*) FROM players WHERE is_active=1");
+$players = (int) q(
+  $pdo,
+  "SELECT COUNT(*) FROM players WHERE is_active=1 AND club_name = ? COLLATE NOCASE",
+  [app_club()]
+)->fetchColumn();
 $inj = (int)scalar($pdo, "SELECT COUNT(*) FROM injuries");
 $tr = (int)scalar($pdo, "SELECT COUNT(*) FROM transfers");
 $troph = (int)scalar($pdo, "SELECT COUNT(*) FROM trophies");
