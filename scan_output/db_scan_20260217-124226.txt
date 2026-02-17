@@ -1,0 +1,243 @@
+﻿Projeto: D:\Projetos\palmeiras_manager
+Data: 2026-02-17 12:42:26
+
+
+==========================================================================================
+0) LISTA DE ARQUIVOS ANALISADOS (PHP)
+==========================================================================================
+Total de arquivos PHP: 32
+D:\Projetos\palmeiras_manager\public\index.php
+D:\Projetos\palmeiras_manager\src\add_transfers_player_id.php
+D:\Projetos\palmeiras_manager\src\bootstrap.php
+D:\Projetos\palmeiras_manager\src\check_matches_cols.php
+D:\Projetos\palmeiras_manager\src\check_schema.php
+D:\Projetos\palmeiras_manager\src\create_views.php
+D:\Projetos\palmeiras_manager\src\db.php
+D:\Projetos\palmeiras_manager\src\db_patch_transfers_eur.php
+D:\Projetos\palmeiras_manager\src\fix_players_timestamps.php
+D:\Projetos\palmeiras_manager\src\fix_transfers_value_integer.php
+D:\Projetos\palmeiras_manager\src\layout.php
+D:\Projetos\palmeiras_manager\src\layout_old.php
+D:\Projetos\palmeiras_manager\src\migrate.php
+D:\Projetos\palmeiras_manager\src\migrate_v2.php
+D:\Projetos\palmeiras_manager\src\pages\create_match.php
+D:\Projetos\palmeiras_manager\src\pages\create_match_bkp.php
+D:\Projetos\palmeiras_manager\src\pages\dashboard.php
+D:\Projetos\palmeiras_manager\src\pages\injuries.php
+D:\Projetos\palmeiras_manager\src\pages\match.php
+D:\Projetos\palmeiras_manager\src\pages\matches.php
+D:\Projetos\palmeiras_manager\src\pages\matches_old.php
+D:\Projetos\palmeiras_manager\src\pages\opponents.php
+D:\Projetos\palmeiras_manager\src\pages\players.php
+D:\Projetos\palmeiras_manager\src\pages\reports.php
+D:\Projetos\palmeiras_manager\src\pages\stats.php
+D:\Projetos\palmeiras_manager\src\pages\templates.php
+D:\Projetos\palmeiras_manager\src\pages\transfers.php
+D:\Projetos\palmeiras_manager\src\pages\trophies.php
+D:\Projetos\palmeiras_manager\src\pages\vs_adversarios.php
+D:\Projetos\palmeiras_manager\src\rebuild_all_views.php
+D:\Projetos\palmeiras_manager\src\rebuild_pm_views.php
+D:\Projetos\palmeiras_manager\src\rebuild_views.php
+
+==========================================================================================
+1) ARQUIVOS DE BANCO ENCONTRADOS (*.sqlite / *.db)
+==========================================================================================
+D:\Projetos\palmeiras_manager\app.sqlite	0 bytes	2026-02-17 02:03:35	app.sqlite
+D:\Projetos\palmeiras_manager\data\app.sqlite	98304 bytes	2026-02-17 11:58:08	app.sqlite
+D:\Projetos\palmeiras_manager\database.sqlite	0 bytes	2026-02-17 02:09:22	database.sqlite
+
+==========================================================================================
+2) SQLITE3 DISPONIVEL?
+==========================================================================================
+sqlite3 encontrado em: C:\Users\marcelo\AppData\Local\Microsoft\WinGet\Links\sqlite3.exe
+
+==========================================================================================
+3) TABELAS EXISTENTES EM CADA BANCO (sqlite3 <db> .tables)
+==========================================================================================
+
+--- DB: D:\Projetos\palmeiras_manager\app.sqlite ---
+(sem tabelas visÃ­veis ou arquivo vazio/corrompido)
+
+--- DB: D:\Projetos\palmeiras_manager\data\app.sqlite ---
+System.Object[]
+
+--- DB: D:\Projetos\palmeiras_manager\database.sqlite ---
+(sem tabelas visÃ­veis ou arquivo vazio/corrompido)
+
+==========================================================================================
+4) REFERENCIAS A SQLITE NO CODIGO (sqlite: / .sqlite / .db)
+==========================================================================================
+D:\Projetos\palmeiras_manager\src\check_matches_cols.php:4	$pdo = new PDO('sqlite:' . __DIR__ . '/../data/app.sqlite');
+D:\Projetos\palmeiras_manager\src\check_schema.php:2	$pdo = new PDO("sqlite:" . __DIR__ . "/../data/app.sqlite");
+D:\Projetos\palmeiras_manager\src\db.php:9	#  return __DIR__ . '/../data/app.sqlite';
+D:\Projetos\palmeiras_manager\src\db.php:13	  $p = __DIR__ . '/../data/app.sqlite';
+D:\Projetos\palmeiras_manager\src\db.php:22	  $pdo = new PDO('sqlite:' . db_path());
+D:\Projetos\palmeiras_manager\src\db_patch_transfers_eur.php:4	$pdo = new PDO('sqlite:' . __DIR__ . '/../data/app.sqlite');
+D:\Projetos\palmeiras_manager\src\fix_players_timestamps.php:4	$pdo = new PDO('sqlite:' . __DIR__ . '/../data/app.sqlite');
+
+==========================================================================================
+5) ESCRITAS NO BANCO (INSERT/UPDATE/DELETE/REPLACE) EM PHP
+==========================================================================================
+D:\Projetos\palmeiras_manager\src\fix_players_timestamps.php:23	$pdo->exec("UPDATE players SET created_at = COALESCE(created_at, datetime('now'))");
+D:\Projetos\palmeiras_manager\src\fix_transfers_value_integer.php:75	  $pdo->exec("INSERT INTO transfers_new ($colList) SELECT $selectExpr FROM transfers");
+D:\Projetos\palmeiras_manager\src\pages\create_match.php:240	    q($pdo, "INSERT INTO matches(
+D:\Projetos\palmeiras_manager\src\pages\create_match.php:259	      INSERT INTO match_players(match_id, club_name, player_id, role, position, sort_order, entered)
+D:\Projetos\palmeiras_manager\src\pages\create_match.php:263	      INSERT INTO match_player_stats(match_id, club_name, player_id, goals_for, goals_against, assists, yellow_cards, red_cards, rating, motm)
+D:\Projetos\palmeiras_manager\src\pages\create_match.php:294	      INSERT INTO players(name, shirt_number, primary_position, secondary_positions, is_active, club_name, created_at, updated_at)
+D:\Projetos\palmeiras_manager\src\pages\create_match_bkp.php:176	    q($pdo, "INSERT INTO matches(
+D:\Projetos\palmeiras_manager\src\pages\create_match_bkp.php:194	    $insMatchPlayer = $pdo->prepare("INSERT INTO match_players(match_id, club_name, player_id, role, position, sort_order, entered)
+D:\Projetos\palmeiras_manager\src\pages\create_match_bkp.php:196	    $insStats = $pdo->prepare("INSERT INTO match_player_stats(match_id, club_name, player_id, goals_for, goals_against, assists, yellow_cards, red_cards, rating, motm)
+D:\Projetos\palmeiras_manager\src\pages\create_match_bkp.php:230	      INSERT INTO players(name, shirt_number, primary_position, secondary_positions, is_active, club_name, created_at, updated_at)
+D:\Projetos\palmeiras_manager\src\pages\injuries.php:20	      q($pdo, "UPDATE injuries SET player_id=?, injury_type=?, injured_part=?, injury_date=?, recovery_time=?, return_date=?, notes=? WHERE id=?",
+D:\Projetos\palmeiras_manager\src\pages\injuries.php:23	      q($pdo, "INSERT INTO injuries(player_id, injury_type, injured_part, injury_date, recovery_time, return_date, notes) VALUES (?,?,?,?,?,?,?)",
+D:\Projetos\palmeiras_manager\src\pages\injuries.php:32	if (isset($_GET['del'])) { q($pdo, "DELETE FROM injuries WHERE id=?", [(int)$_GET['del']]); redirect('/?page=injuries'); }
+D:\Projetos\palmeiras_manager\src\pages\match.php:83	  q($pdo,"DELETE FROM match_player_stats WHERE match_id=?",[$id]);
+D:\Projetos\palmeiras_manager\src\pages\match.php:84	  q($pdo,"DELETE FROM match_players WHERE match_id=?",[$id]);
+D:\Projetos\palmeiras_manager\src\pages\match.php:87	    INSERT INTO match_players(match_id,club_name,player_id,role,position,sort_order,entered)
+D:\Projetos\palmeiras_manager\src\pages\match.php:92	    INSERT INTO match_player_stats(match_id,club_name,player_id,goals_for,goals_against,assists,yellow_cards,red_cards,rating,motm)
+D:\Projetos\palmeiras_manager\src\pages\matches.php:36	    q($pdo, "DELETE FROM match_player_stats WHERE match_id = ?", [$matchId]);
+D:\Projetos\palmeiras_manager\src\pages\matches.php:37	    q($pdo, "DELETE FROM match_players      WHERE match_id = ?", [$matchId]);
+D:\Projetos\palmeiras_manager\src\pages\matches.php:40	    q($pdo, "DELETE FROM matches WHERE id = ?", [$matchId]);
+D:\Projetos\palmeiras_manager\src\pages\matches_old.php:53	    q($pdo, "DELETE FROM match_player_stats WHERE match_id = ?", [$id]);
+D:\Projetos\palmeiras_manager\src\pages\matches_old.php:54	    q($pdo, "DELETE FROM substitutions      WHERE match_id = ?", [$id]);
+D:\Projetos\palmeiras_manager\src\pages\matches_old.php:55	    q($pdo, "DELETE FROM match_players      WHERE match_id = ?", [$id]);
+D:\Projetos\palmeiras_manager\src\pages\matches_old.php:56	    q($pdo, "DELETE FROM matches            WHERE id       = ?", [$id]);
+D:\Projetos\palmeiras_manager\src\pages\matches_old.php:104	      q($pdo, "UPDATE matches SET
+D:\Projetos\palmeiras_manager\src\pages\matches_old.php:123	      q($pdo, "INSERT INTO matches(
+D:\Projetos\palmeiras_manager\src\pages\players.php:33	  q($pdo, "DELETE FROM players WHERE id=?", [(int)$_GET['del']]);
+D:\Projetos\palmeiras_manager\src\pages\players.php:82	      q($pdo, "UPDATE players
+D:\Projetos\palmeiras_manager\src\pages\players.php:88	      q($pdo, "INSERT INTO players(name, shirt_number, primary_position, secondary_positions, is_active)
+D:\Projetos\palmeiras_manager\src\pages\templates.php:19	    q($pdo, "UPDATE lineup_templates SET formation=?, notes=? WHERE id=?", [$formation,$notes,$tplId]);
+D:\Projetos\palmeiras_manager\src\pages\templates.php:30	    q($pdo, "INSERT INTO lineup_template_slots(template_id, role, sort_order, player_id, position)
+D:\Projetos\palmeiras_manager\src\pages\templates.php:32	            ON CONFLICT(template_id, role, sort_order) DO UPDATE SET player_id=excluded.player_id, position=excluded.position",
+D:\Projetos\palmeiras_manager\src\pages\templates.php:39	    q($pdo, "DELETE FROM lineup_template_slots WHERE template_id=?", [$tplId]);
+D:\Projetos\palmeiras_manager\src\pages\transfers.php:142	      q($pdo, "DELETE FROM transfers WHERE id = ?", [$id]);
+D:\Projetos\palmeiras_manager\src\pages\transfers.php:229	        "UPDATE transfers
+D:\Projetos\palmeiras_manager\src\pages\transfers.php:264	        "INSERT INTO transfers(
+D:\Projetos\palmeiras_manager\src\pages\trophies.php:85	      q($pdo, "UPDATE trophies SET competition_name=?, season=?, achieved_at=?, notes=? WHERE id=?", [$comp,$season,$ach,$notes,$id]);
+D:\Projetos\palmeiras_manager\src\pages\trophies.php:87	      q($pdo, "INSERT INTO trophies(competition_name, season, achieved_at, notes) VALUES (?,?,?,?)", [$comp,$season,$ach,$notes]);
+D:\Projetos\palmeiras_manager\src\pages\trophies.php:95	if (isset($_GET['del'])) { q($pdo, "DELETE FROM trophies WHERE id=?", [(int)$_GET['del']]); redirect('/?page=trophies'); }
+
+==========================================================================================
+6) USO DE TRANSACOES / PREPARE / EXEC
+==========================================================================================
+D:\Projetos\palmeiras_manager\src\add_transfers_player_id.php:6	$pdo->exec("ALTER TABLE transfers ADD COLUMN player_id INTEGER");
+D:\Projetos\palmeiras_manager\src\create_views.php:10	  $pdo->exec($sql);
+D:\Projetos\palmeiras_manager\src\db.php:26	  $pdo->exec('PRAGMA foreign_keys = ON;');
+D:\Projetos\palmeiras_manager\src\db.php:27	  $pdo->exec('PRAGMA journal_mode = WAL;');
+D:\Projetos\palmeiras_manager\src\db.php:42	  $st = $pdo->prepare($sql);
+D:\Projetos\palmeiras_manager\src\db_patch_transfers_eur.php:12	  $pdo->exec("ALTER TABLE transfers ADD COLUMN value_eur_cents INTEGER NOT NULL DEFAULT 0");
+D:\Projetos\palmeiras_manager\src\fix_players_timestamps.php:10	    $pdo->exec("ALTER TABLE players ADD COLUMN updated_at TEXT");
+D:\Projetos\palmeiras_manager\src\fix_players_timestamps.php:17	    $pdo->exec("ALTER TABLE players ADD COLUMN created_at TEXT");
+D:\Projetos\palmeiras_manager\src\fix_players_timestamps.php:23	$pdo->exec("UPDATE players SET created_at = COALESCE(created_at, datetime('now'))");
+D:\Projetos\palmeiras_manager\src\fix_transfers_value_integer.php:40	$pdo->exec("BEGIN");
+D:\Projetos\palmeiras_manager\src\fix_transfers_value_integer.php:42	  $pdo->exec("DROP TABLE IF EXISTS transfers_new");
+D:\Projetos\palmeiras_manager\src\fix_transfers_value_integer.php:43	  $pdo->exec("CREATE TABLE transfers_new (" . implode(", ", $createCols) . ")");
+D:\Projetos\palmeiras_manager\src\fix_transfers_value_integer.php:75	  $pdo->exec("INSERT INTO transfers_new ($colList) SELECT $selectExpr FROM transfers");
+D:\Projetos\palmeiras_manager\src\fix_transfers_value_integer.php:78	  $pdo->exec("DROP TABLE transfers");
+D:\Projetos\palmeiras_manager\src\fix_transfers_value_integer.php:79	  $pdo->exec("ALTER TABLE transfers_new RENAME TO transfers");
+D:\Projetos\palmeiras_manager\src\fix_transfers_value_integer.php:81	  $pdo->exec("COMMIT");
+D:\Projetos\palmeiras_manager\src\fix_transfers_value_integer.php:84	  $pdo->exec("ROLLBACK");
+D:\Projetos\palmeiras_manager\src\migrate.php:8	$pdo->beginTransaction();
+D:\Projetos\palmeiras_manager\src\migrate.php:10	$pdo->exec("
+D:\Projetos\palmeiras_manager\src\migrate.php:139	$pdo->exec("INSERT OR IGNORE INTO lineup_templates(template_name) VALUES ('TITULAR');");
+D:\Projetos\palmeiras_manager\src\migrate.php:140	$pdo->exec("INSERT OR IGNORE INTO lineup_templates(template_name) VALUES ('RESERVA');");
+D:\Projetos\palmeiras_manager\src\migrate.php:145	$pdo->exec("DROP VIEW IF EXISTS v_pal_matches;");
+D:\Projetos\palmeiras_manager\src\migrate.php:146	$pdo->exec("
+D:\Projetos\palmeiras_manager\src\migrate.php:196	$pdo->exec("DROP VIEW IF EXISTS v_player_match_stats;");
+D:\Projetos\palmeiras_manager\src\migrate.php:197	$pdo->exec("
+D:\Projetos\palmeiras_manager\src\migrate.php:226	$pdo->commit();
+D:\Projetos\palmeiras_manager\src\migrate_v2.php:17	  $pdo->exec("ALTER TABLE matches ADD COLUMN $name $type");
+D:\Projetos\palmeiras_manager\src\pages\create_match.php:238	  $pdo->beginTransaction();
+D:\Projetos\palmeiras_manager\src\pages\create_match.php:258	    $insMatchPlayer = $pdo->prepare("
+D:\Projetos\palmeiras_manager\src\pages\create_match.php:262	    $insStats = $pdo->prepare("
+D:\Projetos\palmeiras_manager\src\pages\create_match.php:292	    $findOppPlayer = $pdo->prepare("SELECT id FROM players WHERE club_name = ? AND name = ? LIMIT 1");
+D:\Projetos\palmeiras_manager\src\pages\create_match.php:293	    $insOppPlayer  = $pdo->prepare("
+D:\Projetos\palmeiras_manager\src\pages\create_match.php:336	    $pdo->commit();
+D:\Projetos\palmeiras_manager\src\pages\create_match.php:342	    if ($pdo->inTransaction()) $pdo->rollBack();
+D:\Projetos\palmeiras_manager\src\pages\create_match_bkp.php:174	  $pdo->beginTransaction();
+D:\Projetos\palmeiras_manager\src\pages\create_match_bkp.php:194	    $insMatchPlayer = $pdo->prepare("INSERT INTO match_players(match_id, club_name, player_id, role, position, sort_order, entered)
+D:\Projetos\palmeiras_manager\src\pages\create_match_bkp.php:196	    $insStats = $pdo->prepare("INSERT INTO match_player_stats(match_id, club_name, player_id, goals_for, goals_against, assists, yellow_cards, red_cards, rating, motm)
+D:\Projetos\palmeiras_manager\src\pages\create_match_bkp.php:228	    $findOppPlayer = $pdo->prepare("SELECT id FROM players WHERE club_name = ? AND name = ? LIMIT 1");
+D:\Projetos\palmeiras_manager\src\pages\create_match_bkp.php:229	    $insOppPlayer  = $pdo->prepare("
+D:\Projetos\palmeiras_manager\src\pages\create_match_bkp.php:275	    $pdo->commit();
+D:\Projetos\palmeiras_manager\src\pages\create_match_bkp.php:278	    $pdo->rollBack();
+D:\Projetos\palmeiras_manager\src\pages\match.php:81	  $pdo->beginTransaction();
+D:\Projetos\palmeiras_manager\src\pages\match.php:86	  $insertMp = $pdo->prepare("
+D:\Projetos\palmeiras_manager\src\pages\match.php:91	  $insertSt = $pdo->prepare("
+D:\Projetos\palmeiras_manager\src\pages\match.php:122	  $pdo->commit();
+D:\Projetos\palmeiras_manager\src\pages\matches.php:33	  $pdo->beginTransaction();
+D:\Projetos\palmeiras_manager\src\pages\matches.php:42	    $pdo->commit();
+D:\Projetos\palmeiras_manager\src\pages\matches.php:45	    $pdo->rollBack();
+D:\Projetos\palmeiras_manager\src\pages\templates.php:45	$pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS ux_tpl_slot ON lineup_template_slots(template_id, role, sort_order);");
+D:\Projetos\palmeiras_manager\src\rebuild_all_views.php:10	$pdo->exec("BEGIN");
+D:\Projetos\palmeiras_manager\src\rebuild_all_views.php:15	  $pdo->exec("DROP VIEW IF EXISTS v_pal_matches");
+D:\Projetos\palmeiras_manager\src\rebuild_all_views.php:16	  $pdo->exec("DROP VIEW IF EXISTS v_player_match_stats");
+D:\Projetos\palmeiras_manager\src\rebuild_all_views.php:19	  $pdo->exec("
+D:\Projetos\palmeiras_manager\src\rebuild_all_views.php:28	  $pdo->exec("
+D:\Projetos\palmeiras_manager\src\rebuild_all_views.php:45	  $pdo->exec("COMMIT");
+D:\Projetos\palmeiras_manager\src\rebuild_all_views.php:50	  $pdo->exec("ROLLBACK");
+D:\Projetos\palmeiras_manager\src\rebuild_pm_views.php:13	$pdo->exec("BEGIN");
+D:\Projetos\palmeiras_manager\src\rebuild_pm_views.php:16	  $pdo->exec("DROP VIEW IF EXISTS v_pm_vs_opponents");
+D:\Projetos\palmeiras_manager\src\rebuild_pm_views.php:17	  $pdo->exec("DROP VIEW IF EXISTS v_pm_top_blowouts");
+D:\Projetos\palmeiras_manager\src\rebuild_pm_views.php:18	  $pdo->exec("DROP VIEW IF EXISTS v_pm_matches");
+D:\Projetos\palmeiras_manager\src\rebuild_pm_views.php:19	  $pdo->exec("DROP VIEW IF EXISTS v_pal_matches");
+D:\Projetos\palmeiras_manager\src\rebuild_pm_views.php:20	  $pdo->exec("DROP VIEW IF EXISTS v_player_match_stats");
+D:\Projetos\palmeiras_manager\src\rebuild_pm_views.php:23	  $pdo->exec("
+D:\Projetos\palmeiras_manager\src\rebuild_pm_views.php:61	  $pdo->exec("
+D:\Projetos\palmeiras_manager\src\rebuild_pm_views.php:82	  $pdo->exec("
+D:\Projetos\palmeiras_manager\src\rebuild_pm_views.php:100	  $pdo->exec("
+D:\Projetos\palmeiras_manager\src\rebuild_pm_views.php:118	  $pdo->exec("
+D:\Projetos\palmeiras_manager\src\rebuild_pm_views.php:123	  $pdo->exec("COMMIT");
+D:\Projetos\palmeiras_manager\src\rebuild_pm_views.php:126	  $pdo->exec("ROLLBACK");
+D:\Projetos\palmeiras_manager\src\rebuild_views.php:13	$pdo->exec("BEGIN");
+D:\Projetos\palmeiras_manager\src\rebuild_views.php:25	    $pdo->exec("DROP VIEW IF EXISTS $v");
+D:\Projetos\palmeiras_manager\src\rebuild_views.php:29	  $pdo->exec("
+D:\Projetos\palmeiras_manager\src\rebuild_views.php:70	  $pdo->exec("
+D:\Projetos\palmeiras_manager\src\rebuild_views.php:92	  $pdo->exec("
+D:\Projetos\palmeiras_manager\src\rebuild_views.php:111	  $pdo->exec("
+D:\Projetos\palmeiras_manager\src\rebuild_views.php:130	  $pdo->exec("
+D:\Projetos\palmeiras_manager\src\rebuild_views.php:145	  $pdo->exec("COMMIT");
+D:\Projetos\palmeiras_manager\src\rebuild_views.php:148	  $pdo->exec("ROLLBACK");
+
+==========================================================================================
+7) BONUS: MIGRATIONS/SQL (CREATE/ALTER/DROP/INDEX)
+==========================================================================================
+D:\Projetos\palmeiras_manager\database\migrations\20260216_add_players_club.sql:1	ALTER TABLE players ADD COLUMN club_name TEXT NOT NULL DEFAULT 'PALMEIRAS';
+D:\Projetos\palmeiras_manager\scan_output\db_scan_20260217-124226.txt:124	D:\Projetos\palmeiras_manager\src\add_transfers_player_id.php:6	$pdo->exec("ALTER TABLE transfers ADD COLUMN player_id INTEGER");
+D:\Projetos\palmeiras_manager\scan_output\db_scan_20260217-124226.txt:129	D:\Projetos\palmeiras_manager\src\db_patch_transfers_eur.php:12	  $pdo->exec("ALTER TABLE transfers ADD COLUMN value_eur_cents INTEGER NOT NULL DEFAULT 0");
+D:\Projetos\palmeiras_manager\scan_output\db_scan_20260217-124226.txt:130	D:\Projetos\palmeiras_manager\src\fix_players_timestamps.php:10	    $pdo->exec("ALTER TABLE players ADD COLUMN updated_at TEXT");
+D:\Projetos\palmeiras_manager\scan_output\db_scan_20260217-124226.txt:131	D:\Projetos\palmeiras_manager\src\fix_players_timestamps.php:17	    $pdo->exec("ALTER TABLE players ADD COLUMN created_at TEXT");
+D:\Projetos\palmeiras_manager\scan_output\db_scan_20260217-124226.txt:134	D:\Projetos\palmeiras_manager\src\fix_transfers_value_integer.php:42	  $pdo->exec("DROP TABLE IF EXISTS transfers_new");
+D:\Projetos\palmeiras_manager\scan_output\db_scan_20260217-124226.txt:135	D:\Projetos\palmeiras_manager\src\fix_transfers_value_integer.php:43	  $pdo->exec("CREATE TABLE transfers_new (" . implode(", ", $createCols) . ")");
+D:\Projetos\palmeiras_manager\scan_output\db_scan_20260217-124226.txt:137	D:\Projetos\palmeiras_manager\src\fix_transfers_value_integer.php:78	  $pdo->exec("DROP TABLE transfers");
+D:\Projetos\palmeiras_manager\scan_output\db_scan_20260217-124226.txt:138	D:\Projetos\palmeiras_manager\src\fix_transfers_value_integer.php:79	  $pdo->exec("ALTER TABLE transfers_new RENAME TO transfers");
+D:\Projetos\palmeiras_manager\scan_output\db_scan_20260217-124226.txt:150	D:\Projetos\palmeiras_manager\src\migrate_v2.php:17	  $pdo->exec("ALTER TABLE matches ADD COLUMN $name $type");
+D:\Projetos\palmeiras_manager\src\add_transfers_player_id.php:6	$pdo->exec("ALTER TABLE transfers ADD COLUMN player_id INTEGER");
+D:\Projetos\palmeiras_manager\src\db_patch_transfers_eur.php:12	  $pdo->exec("ALTER TABLE transfers ADD COLUMN value_eur_cents INTEGER NOT NULL DEFAULT 0");
+D:\Projetos\palmeiras_manager\src\fix_players_timestamps.php:10	    $pdo->exec("ALTER TABLE players ADD COLUMN updated_at TEXT");
+D:\Projetos\palmeiras_manager\src\fix_players_timestamps.php:17	    $pdo->exec("ALTER TABLE players ADD COLUMN created_at TEXT");
+D:\Projetos\palmeiras_manager\src\fix_transfers_value_integer.php:42	  $pdo->exec("DROP TABLE IF EXISTS transfers_new");
+D:\Projetos\palmeiras_manager\src\fix_transfers_value_integer.php:43	  $pdo->exec("CREATE TABLE transfers_new (" . implode(", ", $createCols) . ")");
+D:\Projetos\palmeiras_manager\src\fix_transfers_value_integer.php:78	  $pdo->exec("DROP TABLE transfers");
+D:\Projetos\palmeiras_manager\src\fix_transfers_value_integer.php:79	  $pdo->exec("ALTER TABLE transfers_new RENAME TO transfers");
+D:\Projetos\palmeiras_manager\src\migrate.php:11	CREATE TABLE IF NOT EXISTS players (
+D:\Projetos\palmeiras_manager\src\migrate.php:22	CREATE TABLE IF NOT EXISTS matches (
+D:\Projetos\palmeiras_manager\src\migrate.php:42	CREATE TABLE IF NOT EXISTS match_players (
+D:\Projetos\palmeiras_manager\src\migrate.php:55	CREATE TABLE IF NOT EXISTS match_player_stats (
+D:\Projetos\palmeiras_manager\src\migrate.php:71	CREATE TABLE IF NOT EXISTS substitutions (
+D:\Projetos\palmeiras_manager\src\migrate.php:81	CREATE TABLE IF NOT EXISTS trophies (
+D:\Projetos\palmeiras_manager\src\migrate.php:89	CREATE TABLE IF NOT EXISTS transfers (
+D:\Projetos\palmeiras_manager\src\migrate.php:105	CREATE TABLE IF NOT EXISTS injuries (
+D:\Projetos\palmeiras_manager\src\migrate.php:116	CREATE TABLE IF NOT EXISTS lineup_templates (
+D:\Projetos\palmeiras_manager\src\migrate.php:123	CREATE TABLE IF NOT EXISTS lineup_template_slots (
+D:\Projetos\palmeiras_manager\src\migrate.php:132	CREATE INDEX IF NOT EXISTS idx_match_players_match ON match_players(match_id);
+D:\Projetos\palmeiras_manager\src\migrate.php:133	CREATE INDEX IF NOT EXISTS idx_match_stats_match ON match_player_stats(match_id);
+D:\Projetos\palmeiras_manager\src\migrate.php:134	CREATE INDEX IF NOT EXISTS idx_transfers_date ON transfers(transaction_date);
+D:\Projetos\palmeiras_manager\src\migrate.php:135	CREATE INDEX IF NOT EXISTS idx_injuries_date ON injuries(injury_date);
+D:\Projetos\palmeiras_manager\src\migrate_v2.php:17	  $pdo->exec("ALTER TABLE matches ADD COLUMN $name $type");
+
+==========================================================================================
+FIM
+==========================================================================================
+Relatorio gerado em: D:\Projetos\palmeiras_manager\scan_output\db_scan_20260217-124226.txt

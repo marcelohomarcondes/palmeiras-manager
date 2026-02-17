@@ -145,17 +145,17 @@ function row_player_opp(int $i, string $role, array $positions): void {
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 
   $season      = trim((string)($_POST['season'] ?? ''));
-  $competition = trim((string)($_POST['competition'] ?? ''));
+  $competition = strtoupper(trim((string)($_POST['competition'] ?? '')));
   $date        = trim((string)($_POST['match_date'] ?? ''));
   $match_time  = trim((string)($_POST['match_time'] ?? ''));
-  $phase       = trim((string)($_POST['phase'] ?? ''));
+  $phase       = strtoupper(trim((string)($_POST['phase'] ?? '')));
   $round       = trim((string)($_POST['round'] ?? ''));
-  $stadium     = trim((string)($_POST['stadium'] ?? ''));
-  $referee     = trim((string)($_POST['referee'] ?? ''));
+  $stadium     = strtoupper(trim((string)($_POST['stadium'] ?? '')));
+  $referee     = strtoupper(trim((string)($_POST['referee'] ?? '')));
   $kit_used    = trim((string)($_POST['kit_used'] ?? ''));
-  $weather     = trim((string)($_POST['weather'] ?? ''));
-  $home        = trim((string)($_POST['home'] ?? ''));
-  $away        = trim((string)($_POST['away'] ?? ''));
+  $weather     = strtoupper(trim((string)($_POST['weather'] ?? '')));
+  $home        = strtoupper(trim((string)($_POST['home'] ?? '')));
+  $away        = strtoupper(trim((string)($_POST['away'] ?? '')));
 
   // Placar (opcional)
   $hsRaw = trim((string)($_POST['home_score'] ?? ''));
@@ -288,10 +288,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
       }
     };
 
-    // Adversário (cria em players se não existir)
-    $findOppPlayer = $pdo->prepare("SELECT id FROM players WHERE club_name = ? AND name = ? LIMIT 1");
+    // Adversário (cria em opponent_players se não existir)
+    $findOppPlayer = $pdo->prepare("SELECT id FROM opponent_players WHERE club_name = ? AND name = ? LIMIT 1");
     $insOppPlayer  = $pdo->prepare("
-      INSERT INTO players(name, shirt_number, primary_position, secondary_positions, is_active, club_name, created_at, updated_at)
+      INSERT INTO opponent_players(name, shirt_number, primary_position, secondary_positions, is_active, club_name, created_at, updated_at)
       VALUES (?,?,?,?,?,?,datetime('now'),datetime('now'))
     ");
 
@@ -353,8 +353,9 @@ $players = q($pdo, "
   SELECT id, name, shirt_number
   FROM players
   WHERE is_active = 1
+    AND club_name = ? COLLATE NOCASE
   ORDER BY name
-")->fetchAll();
+", [$club])->fetchAll();
 
 render_header('Cadastrar partida');
 

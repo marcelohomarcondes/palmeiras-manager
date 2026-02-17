@@ -30,8 +30,9 @@ if (isset($_GET['edit'])) {
 
 // Delete (GET)
 if (isset($_GET['del'])) {
-  q($pdo, "DELETE FROM players WHERE id=?", [(int)$_GET['del']]);
-  redirect('/?page=players');
+#  q($pdo, "DELETE FROM players WHERE id=?", [(int)$_GET['del']]);
+#  redirect('/?page=players');
+  q($pdo, "DELETE FROM players WHERE id=? AND club_name = ? COLLATE NOCASE", [(int)$_GET['del'], app_club()]);
 }
 
 // Save (POST)
@@ -80,21 +81,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   } else {
     if ($id > 0) {
       q($pdo, "UPDATE players
-               SET name=?, shirt_number=?, primary_position=?, secondary_positions=?, is_active=?, updated_at=datetime('now')
-               WHERE id=?",
-        [$name, $shirt, $prim, $sec, $active, $id]
+              SET name=?, shirt_number=?, primary_position=?, secondary_positions=?, is_active=?, updated_at=datetime('now')
+              WHERE id=? AND club_name = ? COLLATE NOCASE",
+        [$name, $shirt, $prim, $sec, $active, $id, app_club()]
       );
     } else {
-      q($pdo, "INSERT INTO players(name, shirt_number, primary_position, secondary_positions, is_active)
-               VALUES (?,?,?,?,?)",
-        [$name, $shirt, $prim, $sec, $active]
+      q($pdo, "INSERT INTO players(name, shirt_number, primary_position, secondary_positions, is_active, club_name)
+                VALUES (?,?,?,?,?,?)",
+        [$name, $shirt, $prim, $sec, $active, app_club()]
       );
+
     }
     redirect('/?page=players');
   }
 }
 
-$rows = q($pdo, "SELECT * FROM players ORDER BY is_active DESC, primary_position ASC, shirt_number ASC, name ASC")->fetchAll();
+$rows = q($pdo, "
+  SELECT *
+  FROM players
+  WHERE club_name = ? COLLATE NOCASE
+  ORDER BY is_active DESC, primary_position ASC, shirt_number ASC, name ASC
+", [app_club()])->fetchAll();
 
 render_header('Elenco');
 
