@@ -289,11 +289,16 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     };
 
     // Adversário (cria em opponent_players se não existir)
+//    $findOppPlayer = $pdo->prepare("SELECT id FROM opponent_players WHERE club_name = ? AND name = ? LIMIT 1");
+//    $insOppPlayer  = $pdo->prepare("
+//      INSERT INTO opponent_players(name, shirt_number, primary_position, secondary_positions, is_active, club_name, created_at, updated_at)
+//      VALUES (?,?,?,?,?,?,datetime('now'),datetime('now'))
+//    ");
     $findOppPlayer = $pdo->prepare("SELECT id FROM opponent_players WHERE club_name = ? AND name = ? LIMIT 1");
-    $insOppPlayer  = $pdo->prepare("
-      INSERT INTO opponent_players(name, shirt_number, primary_position, secondary_positions, is_active, club_name, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,datetime('now'),datetime('now'))
-    ");
+      $insOppPlayer = $pdo->prepare("
+        INSERT INTO opponent_players(name, primary_position, secondary_positions, is_active, club_name, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      ");
 
     $saveOpp = function(string $role, int $max) use ($oppClub, $matchId, $insMatchPlayer, $insStats, $positions, $findOppPlayer, $insOppPlayer, $pdo): void {
       for ($i=0; $i<$max; $i++) {
