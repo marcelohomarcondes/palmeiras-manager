@@ -1,0 +1,4 @@
+*.sqlite
+logs/
+vendor/
+

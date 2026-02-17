@@ -1,0 +1,306 @@
+<?php
+declare(strict_types=1);
+$pdo = db();
+
+$id = (int)($_GET['id'] ?? 0);
+$match = q($pdo, "SELECT * FROM matches WHERE id=?", [$id])->fetch();
+if (!$match) { http_response_code(404); echo "Partida não encontrada."; exit; }
+
+$club = app_club();
+
+$players = q($pdo, "SELECT id, name, shirt_number, primary_position FROM players WHERE is_active=1 ORDER BY primary_position, shirt_number, name")->fetchAll();
+$templates = q($pdo, "SELECT * FROM lineup_templates ORDER BY template_name ASC")->fetchAll();
+
+function ensure_stat_row(PDO $pdo, int $matchId, string $clubName, int $playerId): void {
+  q($pdo, "INSERT OR IGNORE INTO match_player_stats(match_id, club_name, player_id) VALUES (?,?,?)", [$matchId,$clubName,$playerId]);
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+  $action = (string)($_POST['action'] ?? '');
+
+  if ($action === 'update_match') {
+    $fields = [
+      'season','competition','phase','round','match_date','match_time','stadium','referee','home_club','away_club','kit_used','weather','notes'
+    ];
+    $data = [];
+    foreach ($fields as $f) $data[$f] = trim((string)($_POST[$f] ?? ''));
+    $hs = ($_POST['home_score'] ?? '') === '' ? null : (int)$_POST['home_score'];
+    $as = ($_POST['away_score'] ?? '') === '' ? null : (int)$_POST['away_score'];
+
+    q($pdo, "UPDATE matches SET season=?,competition=?,phase=?,round=?,match_date=?,match_time=?,stadium=?,referee=?,home_club=?,away_club=?,kit_used=?,weather=?,home_score=?,away_score=?,notes=? WHERE id=?",
+      [$data['season'],$data['competition'],$data['phase'],$data['round'],$data['match_date'],$data['match_time'],$data['stadium'],$data['referee'],$data['home_club'],$data['away_club'],$data['kit_used'],$data['weather'],$hs,$as,$data['notes'],$id]);
+
+    redirect('/?page=match&id=' . $id);
+  }
+
+  if ($action === 'apply_template') {
+    $tplName = (string)($_POST['template_name'] ?? 'TITULAR');
+    $tpl = q($pdo, "SELECT id FROM lineup_templates WHERE template_name=? LIMIT 1", [$tplName])->fetch();
+    if ($tpl) {
+      $tplId = (int)$tpl['id'];
+      $slots = q($pdo, "SELECT * FROM lineup_template_slots WHERE template_id=? ORDER BY role ASC, sort_order ASC", [$tplId])->fetchAll();
+
+      q($pdo, "DELETE FROM match_players WHERE match_id=? AND club_name=?", [$id,$club]);
+
+      $i = 1;
+      foreach ($slots as $s) {
+        if ($s['player_id'] === null) continue;
+        q($pdo, "INSERT INTO match_players(match_id,club_name,player_id,role,position,sort_order,entered) VALUES (?,?,?,?,?,?,0)",
+          [$id,$club,(int)$s['player_id'],(string)$s['role'],(string)$s['position'],$i]);
+        ensure_stat_row($pdo, $id, $club, (int)$s['player_id']);
+        $i++;
+      }
+    }
+    redirect('/?page=match&id=' . $id);
+  }
+
+  if ($action === 'add_match_player') {
+    $playerId = (int)($_POST['player_id'] ?? 0);
+    $role = (string)($_POST['role'] ?? 'STARTER');
+    $pos = trim((string)($_POST['position'] ?? ''));
+    $ord = (int)($_POST['sort_order'] ?? 0);
+
+    if ($playerId > 0) {
+      q($pdo, "INSERT OR REPLACE INTO match_players(match_id,club_name,player_id,role,position,sort_order,entered) VALUES (?,?,?,?,?,?,0)",
+        [$id,$club,$playerId,$role,$pos,$ord]);
+      ensure_stat_row($pdo, $id, $club, $playerId);
+    }
+    redirect('/?page=match&id=' . $id);
+  }
+
+  if ($action === 'remove_match_player') {
+    $playerId = (int)($_POST['player_id'] ?? 0);
+    q($pdo, "DELETE FROM match_players WHERE match_id=? AND club_name=? AND player_id=?", [$id,$club,$playerId]);
+    q($pdo, "DELETE FROM match_player_stats WHERE match_id=? AND club_name=? AND player_id=?", [$id,$club,$playerId]);
+    redirect('/?page=match&id=' . $id);
+  }
+
+  if ($action === 'save_stats') {
+    // MOTM: apenas 1
+    q($pdo, "UPDATE match_player_stats SET motm=0 WHERE match_id=? AND club_name=?", [$id,$club]);
+
+    foreach ($_POST['p'] ?? [] as $pidStr => $row) {
+      $pid = (int)$pidStr;
+      ensure_stat_row($pdo, $id, $club, $pid);
+
+      $entered = isset($row['entered']) ? 1 : 0;
+      q($pdo, "UPDATE match_players SET entered=? WHERE match_id=? AND club_name=? AND player_id=?", [$entered,$id,$club,$pid]);
+
+      $gf = (int)($row['goals_for'] ?? 0);
+      $ga = (int)($row['goals_against'] ?? 0);
+      $as = (int)($row['assists'] ?? 0);
+      $yc = (int)($row['yellow_cards'] ?? 0);
+      $rc = (int)($row['red_cards'] ?? 0);
+      $rating = ($row['rating'] ?? '') === '' ? null : (float)$row['rating'];
+      $motm = isset($row['motm']) ? 1 : 0;
+
+      q($pdo, "UPDATE match_player_stats
+               SET goals_for=?, goals_against=?, assists=?, yellow_cards=?, red_cards=?, rating=?, motm=?
+               WHERE match_id=? AND club_name=? AND player_id=?",
+        [$gf,$ga,$as,$yc,$rc,$rating,$motm,$id,$club,$pid]);
+    }
+
+    redirect('/?page=match&id=' . $id);
+  }
+
+  if ($action === 'add_sub') {
+    $out = ($_POST['player_out_id'] ?? '') === '' ? null : (int)$_POST['player_out_id'];
+    $in  = ($_POST['player_in_id'] ?? '') === '' ? null : (int)$_POST['player_in_id'];
+    $min = ($_POST['minute'] ?? '') === '' ? null : (int)$_POST['minute'];
+    $et  = isset($_POST['is_extra_time']) ? 1 : 0;
+
+    q($pdo, "INSERT INTO substitutions(match_id,club_name,player_out_id,player_in_id,minute,is_extra_time) VALUES (?,?,?,?,?,?)",
+      [$id,$club,$out,$in,$min,$et]);
+
+    if ($in) ensure_stat_row($pdo, $id, $club, $in);
+
+    redirect('/?page=match&id=' . $id);
+  }
+}
+
+if (isset($_GET['del_sub'])) {
+  q($pdo, "DELETE FROM substitutions WHERE id=?", [(int)$_GET['del_sub']]);
+  redirect('/?page=match&id=' . $id);
+}
+
+$mp = q($pdo, "SELECT mp.*, p.name, p.shirt_number FROM match_players mp JOIN players p ON p.id=mp.player_id
+              WHERE mp.match_id=? AND mp.club_name=? ORDER BY mp.role ASC, mp.sort_order ASC, p.name ASC", [$id,$club])->fetchAll();
+
+$stats = q($pdo, "SELECT * FROM match_player_stats WHERE match_id=? AND club_name=?", [$id,$club])->fetchAll();
+$statsByPid = [];
+foreach ($stats as $s) $statsByPid[(int)$s['player_id']] = $s;
+
+$subs = q($pdo, "SELECT s.*, po.name AS out_name, pi.name AS in_name
+                FROM substitutions s
+                LEFT JOIN players po ON po.id=s.player_out_id
+                LEFT JOIN players pi ON pi.id=s.player_in_id
+                WHERE s.match_id=? AND s.club_name=?
+                ORDER BY COALESCE(s.minute, 999) ASC, s.id ASC", [$id,$club])->fetchAll();
+
+render_header('Partida');
+
+echo '<div class="row g-3">';
+echo '<div class="col-12"><div class="card card-soft p-3">';
+echo '<div class="d-flex justify-content-between align-items-center">';
+echo '<div><div class="fw-bold fs-5">' . h($match['home_club']) . ' x ' . h($match['away_club']) . '</div>';
+echo '<div class="text-muted small">' . h($match['match_date']) . ' • ' . h($match['competition']) . '</div></div>';
+$pl = ($match['home_score'] === null || $match['away_score'] === null) ? '-' : ((int)$match['home_score'] . ' - ' . (int)$match['away_score']);
+echo '<div class="fs-4 fw-bold">' . h($pl) . '</div>';
+echo '</div>';
+echo '</div></div>';
+
+# Match info edit
+echo '<div class="col-lg-5"><div class="card card-soft p-3">';
+echo '<div class="fw-bold mb-2">Dados da partida</div>';
+echo '<form method="post" class="vstack gap-2">';
+echo '<input type="hidden" name="action" value="update_match">';
+
+$fields = [
+  ['season','Temporada'],['competition','Campeonato'],['phase','Fase'],['round','Rodada'],
+  ['match_date','Data','date'],['match_time','Horário','time'],
+  ['stadium','Estádio'],['referee','Árbitro'],
+  ['home_club','Clube mandante'],['away_club','Clube visitante'],
+  ['kit_used','Uniforme utilizado'],['weather','Clima']
+];
+
+foreach ($fields as $f) {
+  [$k,$lbl,$type] = [$f[0],$f[1],$f[2] ?? 'text'];
+  echo '<div><label class="form-label">' . h($lbl) . '</label><input class="form-control" type="' . h($type) . '" name="' . h($k) . '" value="' . h((string)$match[$k]) . '"></div>';
+}
+
+echo '<div class="row g-2"><div class="col"><label class="form-label">Gols mandante</label><input class="form-control" type="number" name="home_score" value="' . h((string)($match['home_score'] ?? '')) . '"></div>';
+echo '<div class="col"><label class="form-label">Gols visitante</label><input class="form-control" type="number" name="away_score" value="' . h((string)($match['away_score'] ?? '')) . '"></div></div>';
+
+echo '<div><label class="form-label">Notas gerais</label><textarea class="form-control" rows="3" name="notes">' . h((string)$match['notes']) . '</textarea></div>';
+
+echo '<button class="btn btn-success">Salvar dados</button>';
+echo '</form>';
+echo '</div></div>';
+
+# Template + add players
+echo '<div class="col-lg-7"><div class="card card-soft p-3">';
+echo '<div class="d-flex justify-content-between align-items-center mb-2">';
+echo '<div class="fw-bold">Ficha técnica • ' . h(app_club()) . '</div>';
+echo '<a class="btn btn-sm btn-outline-secondary" href="/?page=matches">Voltar</a>';
+echo '</div>';
+
+echo '<div class="row g-2 mb-2">';
+echo '<div class="col-md-6">';
+echo '<form method="post" class="d-flex gap-2 align-items-end">';
+echo '<input type="hidden" name="action" value="apply_template">';
+echo '<div class="flex-grow-1"><label class="form-label">Aplicar template</label><select class="form-select" name="template_name">';
+foreach ($templates as $t) {
+  echo '<option value="' . h($t['template_name']) . '">' . h($t['template_name']) . '</option>';
+}
+echo '</select></div>';
+echo '<button class="btn btn-outline-primary">Aplicar</button>';
+echo '</form>';
+echo '</div>';
+
+echo '<div class="col-md-6">';
+echo '<form method="post" class="d-flex gap-2 align-items-end">';
+echo '<input type="hidden" name="action" value="add_match_player">';
+echo '<div class="flex-grow-1"><label class="form-label">Adicionar atleta</label><select class="form-select" name="player_id">';
+echo '<option value="">-- selecione --</option>';
+foreach ($players as $p) {
+  $lbl = trim((string)($p['shirt_number'] ?? '')) . ' - ' . $p['name'] . ' (' . $p['primary_position'] . ')';
+  echo '<option value="' . (int)$p['id'] . '">' . h($lbl) . '</option>';
+}
+echo '</select></div>';
+echo '<div style="width:140px"><label class="form-label">Role</label><select class="form-select" name="role"><option value="STARTER">Titular</option><option value="BENCH">Reserva</option></select></div>';
+echo '<div style="width:110px"><label class="form-label">Ordem</label><input class="form-control" type="number" name="sort_order" value="0"></div>';
+echo '<div style="width:160px"><label class="form-label">Posição no jogo</label><input class="form-control" name="position" placeholder="ex: LD"></div>';
+echo '<button class="btn btn-outline-primary">Adicionar</button>';
+echo '</form>';
+echo '</div>';
+echo '</div>';
+
+if (!$mp) {
+  echo '<div class="text-muted">Nenhum atleta relacionado ainda. Use template ou adicione manualmente.</div>';
+} else {
+  echo '<div class="table-responsive"><table class="table table-sm align-middle">';
+  echo '<thead><tr><th>Role</th><th>Ordem</th><th>#</th><th>Atleta</th><th>Posição</th><th class="text-end"></th></tr></thead><tbody>';
+  foreach ($mp as $r) {
+    echo '<tr>';
+    echo '<td>' . ($r['role']==='STARTER' ? '<span class="badge text-bg-success">Titular</span>' : '<span class="badge text-bg-secondary">Reserva</span>') . '</td>';
+    echo '<td class="mono">' . (int)$r['sort_order'] . '</td>';
+    echo '<td class="mono">' . h((string)($r['shirt_number'] ?? '')) . '</td>';
+    echo '<td>' . h($r['name']) . '</td>';
+    echo '<td class="text-muted">' . h($r['position']) . '</td>';
+    echo '<td class="text-end">';
+    echo '<form method="post" style="display:inline">';
+    echo '<input type="hidden" name="action" value="remove_match_player">';
+    echo '<input type="hidden" name="player_id" value="' . (int)$r['player_id'] . '">';
+    echo '<button class="btn btn-sm btn-outline-danger" onclick="return confirm(\'Remover da partida?\')">Remover</button>';
+    echo '</form>';
+    echo '</td>';
+    echo '</tr>';
+  }
+  echo '</tbody></table></div>';
+
+  # Stats form
+  echo '<div class="fw-bold mt-3 mb-2">Estatísticas por atleta (final da partida)</div>';
+  echo '<form method="post">';
+  echo '<input type="hidden" name="action" value="save_stats">';
+  echo '<div class="table-responsive"><table class="table table-sm align-middle">';
+  echo '<thead><tr><th>Atleta</th><th class="text-center">Entrou</th><th class="text-end">GP</th><th class="text-end">GC</th><th class="text-end">A</th><th class="text-end">CA</th><th class="text-end">CV</th><th class="text-end">Nota</th><th class="text-center">MOTM</th></tr></thead><tbody>';
+
+  foreach ($mp as $r) {
+    $pid = (int)$r['player_id'];
+    $s = $statsByPid[$pid] ?? ['goals_for'=>0,'goals_against'=>0,'assists'=>0,'yellow_cards'=>0,'red_cards'=>0,'rating'=>null,'motm'=>0];
+    $enteredChecked = ((int)$r['entered'] === 1) ? 'checked' : '';
+    // titulares: consideramos como entrou implicitamente, mas você pode marcar como quiser
+    echo '<tr>';
+    echo '<td>' . h($r['name']) . ' <span class="text-muted small">(' . h($r['role']) . ' / ' . h($r['position']) . ')</span></td>';
+    echo '<td class="text-center"><input type="checkbox" name="p['.$pid.'][entered]" ' . $enteredChecked . '></td>';
+    echo '<td><input class="form-control form-control-sm text-end" type="number" name="p['.$pid.'][goals_for]" value="' . (int)$s['goals_for'] . '"></td>';
+    echo '<td><input class="form-control form-control-sm text-end" type="number" name="p['.$pid.'][goals_against]" value="' . (int)$s['goals_against'] . '"></td>';
+    echo '<td><input class="form-control form-control-sm text-end" type="number" name="p['.$pid.'][assists]" value="' . (int)$s['assists'] . '"></td>';
+    echo '<td><input class="form-control form-control-sm text-end" type="number" name="p['.$pid.'][yellow_cards]" value="' . (int)$s['yellow_cards'] . '"></td>';
+    echo '<td><input class="form-control form-control-sm text-end" type="number" name="p['.$pid.'][red_cards]" value="' . (int)$s['red_cards'] . '"></td>';
+    $rv = ($s['rating'] === null) ? '' : (string)$s['rating'];
+    echo '<td><input class="form-control form-control-sm text-end" type="number" step="0.1" min="0" max="10" name="p['.$pid.'][rating]" value="' . h($rv) . '"></td>';
+    $motm = ((int)$s['motm'] === 1) ? 'checked' : '';
+    echo '<td class="text-center"><input type="radio" name="p['.$pid.'][motm]" value="1" ' . $motm . '></td>';
+    echo '</tr>';
+  }
+
+  echo '</tbody></table></div>';
+  echo '<button class="btn btn-success">Salvar estatísticas</button>';
+  echo '</form>';
+
+  # Substitutions
+  echo '<div class="fw-bold mt-4 mb-2">Substituições</div>';
+  echo '<form method="post" class="row g-2 align-items-end">';
+  echo '<input type="hidden" name="action" value="add_sub">';
+  echo '<div class="col-md-4"><label class="form-label">Saiu</label><select class="form-select" name="player_out_id"><option value="">(opcional)</option>';
+  foreach ($mp as $r) echo '<option value="' . (int)$r['player_id'] . '">' . h($r['name']) . '</option>';
+  echo '</select></div>';
+  echo '<div class="col-md-4"><label class="form-label">Entrou</label><select class="form-select" name="player_in_id"><option value="">(opcional)</option>';
+  foreach ($mp as $r) echo '<option value="' . (int)$r['player_id'] . '">' . h($r['name']) . '</option>';
+  echo '</select></div>';
+  echo '<div class="col-md-2"><label class="form-label">Minuto</label><input class="form-control" type="number" name="minute"></div>';
+  echo '<div class="col-md-2"><div class="form-check mt-4"><input class="form-check-input" type="checkbox" name="is_extra_time" id="et"><label class="form-check-label" for="et">Prorrogação</label></div></div>';
+  echo '<div class="col-12"><button class="btn btn-outline-primary">Adicionar</button></div>';
+  echo '</form>';
+
+  if ($subs) {
+    echo '<div class="table-responsive mt-2"><table class="table table-sm align-middle">';
+    echo '<thead><tr><th>Min</th><th>Saiu</th><th>Entrou</th><th>ET</th><th></th></tr></thead><tbody>';
+    foreach ($subs as $s) {
+      echo '<tr>';
+      echo '<td class="mono">' . h((string)($s['minute'] ?? '')) . '</td>';
+      echo '<td>' . h((string)($s['out_name'] ?? '')) . '</td>';
+      echo '<td>' . h((string)($s['in_name'] ?? '')) . '</td>';
+      echo '<td>' . ((int)$s['is_extra_time']===1 ? '<span class="badge text-bg-warning">ET</span>' : '') . '</td>';
+      echo '<td class="text-end"><a class="btn btn-sm btn-outline-danger" href="/?page=match&id=' . $id . '&del_sub=' . (int)$s['id'] . '" onclick="return confirm(\'Excluir substituição?\')">Excluir</a></td>';
+      echo '</tr>';
+    }
+    echo '</tbody></table></div>';
+  }
+}
+
+echo '</div></div>'; # end col-lg-7 card
+echo '</div>'; # end row
+
+render_footer();

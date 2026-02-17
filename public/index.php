@@ -1,0 +1,36 @@
+<?php
+declare(strict_types=1);
+
+require_once __DIR__ . '/../src/db.php';
+require_once __DIR__ . '/../src/layout.php';
+
+$page = (string)($_GET['page'] ?? 'dashboard');
+
+$routes = [
+  'dashboard'    => __DIR__ . '/../src/pages/dashboard.php',
+  'players'      => __DIR__ . '/../src/pages/players.php',
+
+  // Partidas (histórico/consulta)
+  'matches'      => __DIR__ . '/../src/pages/matches.php',
+
+  // Cadastrar partida (cadastro completo: infos + jogadores + stats)
+  'create_match' => __DIR__ . '/../src/pages/create_match.php',
+
+  // Detalhe da partida (consulta/edição pontual, se você mantiver)
+  'match'        => __DIR__ . '/../src/pages/match.php',
+
+  'templates'    => __DIR__ . '/../src/pages/templates.php',
+  'transfers'    => __DIR__ . '/../src/pages/transfers.php',
+  'injuries'     => __DIR__ . '/../src/pages/injuries.php',
+  'trophies'     => __DIR__ . '/../src/pages/trophies.php',
+  'opponents'    => __DIR__ . '/../src/pages/opponents.php',
+  'stats'        => __DIR__ . '/../src/pages/stats.php',
+];
+
+if (!isset($routes[$page])) {
+  http_response_code(404);
+  echo "Página não encontrada.";
+  exit;
+}
+
+require $routes[$page];

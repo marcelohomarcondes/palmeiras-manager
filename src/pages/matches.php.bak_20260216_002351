@@ -1,0 +1,662 @@
+<?php
+declare(strict_types=1);
+$pdo = db();
+
+if (<?php
+declare(strict_types=1);
+$pdo = db();
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+  $season = trim((string)($_POST['season'] ?? ''));
+  $competition = trim((string)($_POST['competition'] ?? ''));
+  $phase = trim((string)($_POST['phase'] ?? ''));
+  $round = trim((string)($_POST['round'] ?? ''));
+  $date = trim((string)($_POST['match_date'] ?? ''));
+  $time = trim((string)($_POST['match_time'] ?? ''));
+  $stadium = trim((string)($_POST['stadium'] ?? ''));
+  $referee = trim((string)($_POST['referee'] ?? ''));
+  $home = trim((string)($_POST['home'] ?? ''));
+  $away = trim((string)($_POST['away'] ?? ''));
+  $kit = trim((string)($_POST['kit_used'] ?? ''));
+  $weather = trim((string)($_POST['weather'] ?? ''));
+  $hs = ($_POST['home_score'] ?? '') === '' ? null : (int)$_POST['home_score'];
+  $as = ($_POST['away_score'] ?? '') === '' ? null : (int)$_POST['away_score'];
+
+  if ($season !== '' && $competition !== '' && $date !== '' && $home !== '' && $away !== '') {
+    q($pdo, "INSERT INTO matches(season,competition,phase,round,match_date,match_time,stadium,referee,home,away,kit_used,weather,home_score,away_score)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      [$season,$competition,$phase,$round,$date,$time,$stadium,$referee,$home,$away,$kit,$weather,$hs,$as]);
+  }
+  redirect('/?page=matches');
+}
+
+if (isset($_GET['del'])) {
+  q($pdo, "DELETE FROM matches WHERE id=?", [(int)$_GET['del']]);
+  redirect('/?page=matches');
+}
+
+$rows = q($pdo, "SELECT * FROM matches ORDER BY match_date DESC, id DESC")->fetchAll();
+
+render_header('Partidas');
+
+$err = (string)(<?php
+declare(strict_types=1);
+$pdo = db();
+
+if (<?php
+declare(strict_types=1);
+$pdo = db();
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+  $season = trim((string)($_POST['season'] ?? ''));
+  $competition = trim((string)($_POST['competition'] ?? ''));
+  $phase = trim((string)($_POST['phase'] ?? ''));
+  $round = trim((string)($_POST['round'] ?? ''));
+  $date = trim((string)($_POST['match_date'] ?? ''));
+  $time = trim((string)($_POST['match_time'] ?? ''));
+  $stadium = trim((string)($_POST['stadium'] ?? ''));
+  $referee = trim((string)($_POST['referee'] ?? ''));
+  $home = trim((string)($_POST['home'] ?? ''));
+  $away = trim((string)($_POST['away'] ?? ''));
+  $kit = trim((string)($_POST['kit_used'] ?? ''));
+  $weather = trim((string)($_POST['weather'] ?? ''));
+  $hs = ($_POST['home_score'] ?? '') === '' ? null : (int)$_POST['home_score'];
+  $as = ($_POST['away_score'] ?? '') === '' ? null : (int)$_POST['away_score'];
+
+  if ($season !== '' && $competition !== '' && $date !== '' && $home !== '' && $away !== '') {
+    q($pdo, "INSERT INTO matches(season,competition,phase,round,match_date,match_time,stadium,referee,home,away,kit_used,weather,home_score,away_score)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      [$season,$competition,$phase,$round,$date,$time,$stadium,$referee,$home,$away,$kit,$weather,$hs,$as]);
+  }
+  redirect('/?page=matches');
+}
+
+if (isset($_GET['del'])) {
+  q($pdo, "DELETE FROM matches WHERE id=?", [(int)$_GET['del']]);
+  redirect('/?page=matches');
+}
+
+$rows = q($pdo, "SELECT * FROM matches ORDER BY match_date DESC, id DESC")->fetchAll();
+
+render_header('Partidas');
+
+echo '<div class="row g-3">';
+echo '<div class="col-lg-4"><div class="card card-soft p-3">';
+echo '<div class="fw-bold mb-2">Nova partida</div>';
+
+echo '<form method="post" class="vstack gap-2">';
+echo '<div><label class="form-label">Temporada</label><input class="form-control" name="season" required placeholder="2026"></div>';
+echo '<div><label class="form-label">Campeonato</label><input class="form-control" name="competition" required placeholder="Paulistão / Brasileirão..."></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Fase</label><input class="form-control" name="phase"></div><div class="col"><label class="form-label">Rodada</label><input class="form-control" name="round"></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Data</label><input class="form-control" type="date" name="match_date" required></div><div class="col"><label class="form-label">Horário</label><input class="form-control" type="time" name="match_time"></div></div>';
+echo '<div><label class="form-label">Estádio</label><input class="form-control" name="stadium"></div>';
+echo '<div><label class="form-label">Árbitro</label><input class="form-control" name="referee"></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Mandante</label><input class="form-control" name="home" required value="' . h(app_club()) . '"></div><div class="col"><label class="form-label">Visitante</label><input class="form-control" name="away" required></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Uniforme</label><input class="form-control" name="kit_used"></div><div class="col"><label class="form-label">Clima</label><input class="form-control" name="weather"></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Gols mandante</label><input class="form-control" type="number" name="home_score"></div><div class="col"><label class="form-label">Gols visitante</label><input class="form-control" type="number" name="away_score"></div></div>';
+echo '<button class="btn btn-success">Salvar</button>';
+echo '</form>';
+
+echo '<div class="text-muted small mt-3">Depois de criar, abra a partida para ficha técnica (escalações, substituições, notas e estatísticas).</div>';
+echo '</div></div>';
+
+echo '<div class="col-lg-8"><div class="card card-soft p-3">';
+echo '<div class="d-flex justify-content-between align-items-center mb-2"><div class="fw-bold">Partidas</div><div class="text-muted small">' . count($rows) . '</div></div>';
+echo '<div class="table-responsive"><table class="table table-sm align-middle mb-0">';
+echo '<thead><tr><th>Data</th><th>Comp.</th><th>Jogo</th><th class="text-end">Placar</th><th></th></tr></thead><tbody>';
+
+foreach ($rows as $r) {
+  $pl = ($r['home_score'] === null || $r['away_score'] === null) ? '-' : ((int)$r['home_score'] . ' - ' . (int)$r['away_score']);
+  echo '<tr>';
+  echo '<td>' . h($r['match_date']) . '</td>';
+  echo '<td>' . h($r['competition']) . '</td>';
+  echo '<td>' . h($r['home']) . ' x ' . h($r['away']) . '</td>';
+  echo '<td class="text-end fw-bold">' . h($pl) . '</td>';
+  echo '<td class="text-end">';
+  echo '<a class="btn btn-sm btn-outline-primary" href="/?page=match&id=' . (int)$r['id'] . '">Abrir</a> ';
+  echo '<a class="btn btn-sm btn-outline-danger" href="/?page=matches&del=' . (int)$r['id'] . '" onclick="return confirm(\'Excluir partida?\')">Excluir</a>';
+  echo '</td>';
+  echo '</tr>';
+}
+
+echo '</tbody></table></div>';
+echo '</div></div>';
+echo '</div>';
+
+render_footer();SERVER['REQUEST_METHOD'] === 'POST') {
+  // Palmeiras-only (backend): bloqueia qualquer jogo que não tenha PALMEIRAS
+  $homeCheck = trim((string)(<?php
+declare(strict_types=1);
+$pdo = db();
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+  $season = trim((string)($_POST['season'] ?? ''));
+  $competition = trim((string)($_POST['competition'] ?? ''));
+  $phase = trim((string)($_POST['phase'] ?? ''));
+  $round = trim((string)($_POST['round'] ?? ''));
+  $date = trim((string)($_POST['match_date'] ?? ''));
+  $time = trim((string)($_POST['match_time'] ?? ''));
+  $stadium = trim((string)($_POST['stadium'] ?? ''));
+  $referee = trim((string)($_POST['referee'] ?? ''));
+  $home = trim((string)($_POST['home'] ?? ''));
+  $away = trim((string)($_POST['away'] ?? ''));
+  $kit = trim((string)($_POST['kit_used'] ?? ''));
+  $weather = trim((string)($_POST['weather'] ?? ''));
+  $hs = ($_POST['home_score'] ?? '') === '' ? null : (int)$_POST['home_score'];
+  $as = ($_POST['away_score'] ?? '') === '' ? null : (int)$_POST['away_score'];
+
+  if ($season !== '' && $competition !== '' && $date !== '' && $home !== '' && $away !== '') {
+    q($pdo, "INSERT INTO matches(season,competition,phase,round,match_date,match_time,stadium,referee,home,away,kit_used,weather,home_score,away_score)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      [$season,$competition,$phase,$round,$date,$time,$stadium,$referee,$home,$away,$kit,$weather,$hs,$as]);
+  }
+  redirect('/?page=matches');
+}
+
+if (isset($_GET['del'])) {
+  q($pdo, "DELETE FROM matches WHERE id=?", [(int)$_GET['del']]);
+  redirect('/?page=matches');
+}
+
+$rows = q($pdo, "SELECT * FROM matches ORDER BY match_date DESC, id DESC")->fetchAll();
+
+render_header('Partidas');
+
+echo '<div class="row g-3">';
+echo '<div class="col-lg-4"><div class="card card-soft p-3">';
+echo '<div class="fw-bold mb-2">Nova partida</div>';
+
+echo '<form method="post" class="vstack gap-2">';
+echo '<div><label class="form-label">Temporada</label><input class="form-control" name="season" required placeholder="2026"></div>';
+echo '<div><label class="form-label">Campeonato</label><input class="form-control" name="competition" required placeholder="Paulistão / Brasileirão..."></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Fase</label><input class="form-control" name="phase"></div><div class="col"><label class="form-label">Rodada</label><input class="form-control" name="round"></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Data</label><input class="form-control" type="date" name="match_date" required></div><div class="col"><label class="form-label">Horário</label><input class="form-control" type="time" name="match_time"></div></div>';
+echo '<div><label class="form-label">Estádio</label><input class="form-control" name="stadium"></div>';
+echo '<div><label class="form-label">Árbitro</label><input class="form-control" name="referee"></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Mandante</label><input class="form-control" name="home" required value="' . h(app_club()) . '"></div><div class="col"><label class="form-label">Visitante</label><input class="form-control" name="away" required></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Uniforme</label><input class="form-control" name="kit_used"></div><div class="col"><label class="form-label">Clima</label><input class="form-control" name="weather"></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Gols mandante</label><input class="form-control" type="number" name="home_score"></div><div class="col"><label class="form-label">Gols visitante</label><input class="form-control" type="number" name="away_score"></div></div>';
+echo '<button class="btn btn-success">Salvar</button>';
+echo '</form>';
+
+echo '<div class="text-muted small mt-3">Depois de criar, abra a partida para ficha técnica (escalações, substituições, notas e estatísticas).</div>';
+echo '</div></div>';
+
+echo '<div class="col-lg-8"><div class="card card-soft p-3">';
+echo '<div class="d-flex justify-content-between align-items-center mb-2"><div class="fw-bold">Partidas</div><div class="text-muted small">' . count($rows) . '</div></div>';
+echo '<div class="table-responsive"><table class="table table-sm align-middle mb-0">';
+echo '<thead><tr><th>Data</th><th>Comp.</th><th>Jogo</th><th class="text-end">Placar</th><th></th></tr></thead><tbody>';
+
+foreach ($rows as $r) {
+  $pl = ($r['home_score'] === null || $r['away_score'] === null) ? '-' : ((int)$r['home_score'] . ' - ' . (int)$r['away_score']);
+  echo '<tr>';
+  echo '<td>' . h($r['match_date']) . '</td>';
+  echo '<td>' . h($r['competition']) . '</td>';
+  echo '<td>' . h($r['home']) . ' x ' . h($r['away']) . '</td>';
+  echo '<td class="text-end fw-bold">' . h($pl) . '</td>';
+  echo '<td class="text-end">';
+  echo '<a class="btn btn-sm btn-outline-primary" href="/?page=match&id=' . (int)$r['id'] . '">Abrir</a> ';
+  echo '<a class="btn btn-sm btn-outline-danger" href="/?page=matches&del=' . (int)$r['id'] . '" onclick="return confirm(\'Excluir partida?\')">Excluir</a>';
+  echo '</td>';
+  echo '</tr>';
+}
+
+echo '</tbody></table></div>';
+echo '</div></div>';
+echo '</div>';
+
+render_footer();POST['home'] ?? ''));
+  $awayCheck = trim((string)(<?php
+declare(strict_types=1);
+$pdo = db();
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+  $season = trim((string)($_POST['season'] ?? ''));
+  $competition = trim((string)($_POST['competition'] ?? ''));
+  $phase = trim((string)($_POST['phase'] ?? ''));
+  $round = trim((string)($_POST['round'] ?? ''));
+  $date = trim((string)($_POST['match_date'] ?? ''));
+  $time = trim((string)($_POST['match_time'] ?? ''));
+  $stadium = trim((string)($_POST['stadium'] ?? ''));
+  $referee = trim((string)($_POST['referee'] ?? ''));
+  $home = trim((string)($_POST['home'] ?? ''));
+  $away = trim((string)($_POST['away'] ?? ''));
+  $kit = trim((string)($_POST['kit_used'] ?? ''));
+  $weather = trim((string)($_POST['weather'] ?? ''));
+  $hs = ($_POST['home_score'] ?? '') === '' ? null : (int)$_POST['home_score'];
+  $as = ($_POST['away_score'] ?? '') === '' ? null : (int)$_POST['away_score'];
+
+  if ($season !== '' && $competition !== '' && $date !== '' && $home !== '' && $away !== '') {
+    q($pdo, "INSERT INTO matches(season,competition,phase,round,match_date,match_time,stadium,referee,home,away,kit_used,weather,home_score,away_score)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      [$season,$competition,$phase,$round,$date,$time,$stadium,$referee,$home,$away,$kit,$weather,$hs,$as]);
+  }
+  redirect('/?page=matches');
+}
+
+if (isset($_GET['del'])) {
+  q($pdo, "DELETE FROM matches WHERE id=?", [(int)$_GET['del']]);
+  redirect('/?page=matches');
+}
+
+$rows = q($pdo, "SELECT * FROM matches ORDER BY match_date DESC, id DESC")->fetchAll();
+
+render_header('Partidas');
+
+echo '<div class="row g-3">';
+echo '<div class="col-lg-4"><div class="card card-soft p-3">';
+echo '<div class="fw-bold mb-2">Nova partida</div>';
+
+echo '<form method="post" class="vstack gap-2">';
+echo '<div><label class="form-label">Temporada</label><input class="form-control" name="season" required placeholder="2026"></div>';
+echo '<div><label class="form-label">Campeonato</label><input class="form-control" name="competition" required placeholder="Paulistão / Brasileirão..."></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Fase</label><input class="form-control" name="phase"></div><div class="col"><label class="form-label">Rodada</label><input class="form-control" name="round"></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Data</label><input class="form-control" type="date" name="match_date" required></div><div class="col"><label class="form-label">Horário</label><input class="form-control" type="time" name="match_time"></div></div>';
+echo '<div><label class="form-label">Estádio</label><input class="form-control" name="stadium"></div>';
+echo '<div><label class="form-label">Árbitro</label><input class="form-control" name="referee"></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Mandante</label><input class="form-control" name="home" required value="' . h(app_club()) . '"></div><div class="col"><label class="form-label">Visitante</label><input class="form-control" name="away" required></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Uniforme</label><input class="form-control" name="kit_used"></div><div class="col"><label class="form-label">Clima</label><input class="form-control" name="weather"></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Gols mandante</label><input class="form-control" type="number" name="home_score"></div><div class="col"><label class="form-label">Gols visitante</label><input class="form-control" type="number" name="away_score"></div></div>';
+echo '<button class="btn btn-success">Salvar</button>';
+echo '</form>';
+
+echo '<div class="text-muted small mt-3">Depois de criar, abra a partida para ficha técnica (escalações, substituições, notas e estatísticas).</div>';
+echo '</div></div>';
+
+echo '<div class="col-lg-8"><div class="card card-soft p-3">';
+echo '<div class="d-flex justify-content-between align-items-center mb-2"><div class="fw-bold">Partidas</div><div class="text-muted small">' . count($rows) . '</div></div>';
+echo '<div class="table-responsive"><table class="table table-sm align-middle mb-0">';
+echo '<thead><tr><th>Data</th><th>Comp.</th><th>Jogo</th><th class="text-end">Placar</th><th></th></tr></thead><tbody>';
+
+foreach ($rows as $r) {
+  $pl = ($r['home_score'] === null || $r['away_score'] === null) ? '-' : ((int)$r['home_score'] . ' - ' . (int)$r['away_score']);
+  echo '<tr>';
+  echo '<td>' . h($r['match_date']) . '</td>';
+  echo '<td>' . h($r['competition']) . '</td>';
+  echo '<td>' . h($r['home']) . ' x ' . h($r['away']) . '</td>';
+  echo '<td class="text-end fw-bold">' . h($pl) . '</td>';
+  echo '<td class="text-end">';
+  echo '<a class="btn btn-sm btn-outline-primary" href="/?page=match&id=' . (int)$r['id'] . '">Abrir</a> ';
+  echo '<a class="btn btn-sm btn-outline-danger" href="/?page=matches&del=' . (int)$r['id'] . '" onclick="return confirm(\'Excluir partida?\')">Excluir</a>';
+  echo '</td>';
+  echo '</tr>';
+}
+
+echo '</tbody></table></div>';
+echo '</div></div>';
+echo '</div>';
+
+render_footer();POST['away'] ?? ''));
+  if (($homeCheck !== '' || $awayCheck !== '') && $homeCheck !== app_club() && $awayCheck !== app_club()) {
+    redirect('/?page=matches&err=palmeiras_only');
+  }
+
+  $season = trim((string)($_POST['season'] ?? ''));
+  $competition = trim((string)($_POST['competition'] ?? ''));
+  $phase = trim((string)($_POST['phase'] ?? ''));
+  $round = trim((string)($_POST['round'] ?? ''));
+  $date = trim((string)($_POST['match_date'] ?? ''));
+  $time = trim((string)($_POST['match_time'] ?? ''));
+  $stadium = trim((string)($_POST['stadium'] ?? ''));
+  $referee = trim((string)($_POST['referee'] ?? ''));
+  $home = trim((string)($_POST['home'] ?? ''));
+  $away = trim((string)($_POST['away'] ?? ''));
+  $kit = trim((string)($_POST['kit_used'] ?? ''));
+  $weather = trim((string)($_POST['weather'] ?? ''));
+  $hs = ($_POST['home_score'] ?? '') === '' ? null : (int)$_POST['home_score'];
+  $as = ($_POST['away_score'] ?? '') === '' ? null : (int)$_POST['away_score'];
+
+  if ($season !== '' && $competition !== '' && $date !== '' && $home !== '' && $away !== '') {
+    q($pdo, "INSERT INTO matches(season,competition,phase,round,match_date,match_time,stadium,referee,home,away,kit_used,weather,home_score,away_score)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      [$season,$competition,$phase,$round,$date,$time,$stadium,$referee,$home,$away,$kit,$weather,$hs,$as]);
+  }
+  redirect('/?page=matches');
+}
+
+if (isset($_GET['del'])) {
+  q($pdo, "DELETE FROM matches WHERE id=?", [(int)$_GET['del']]);
+  redirect('/?page=matches');
+}
+
+$rows = q($pdo, "SELECT * FROM matches ORDER BY match_date DESC, id DESC")->fetchAll();
+
+render_header('Partidas');
+
+echo '<div class="row g-3">';
+echo '<div class="col-lg-4"><div class="card card-soft p-3">';
+echo '<div class="fw-bold mb-2">Nova partida</div>';
+
+echo '<form method="post" class="vstack gap-2">';
+echo '<div><label class="form-label">Temporada</label><input class="form-control" name="season" required placeholder="2026"></div>';
+echo '<div><label class="form-label">Campeonato</label><input class="form-control" name="competition" required placeholder="Paulistão / Brasileirão..."></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Fase</label><input class="form-control" name="phase"></div><div class="col"><label class="form-label">Rodada</label><input class="form-control" name="round"></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Data</label><input class="form-control" type="date" name="match_date" required></div><div class="col"><label class="form-label">Horário</label><input class="form-control" type="time" name="match_time"></div></div>';
+echo '<div><label class="form-label">Estádio</label><input class="form-control" name="stadium"></div>';
+echo '<div><label class="form-label">Árbitro</label><input class="form-control" name="referee"></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Mandante</label><input class="form-control" name="home" required value="' . h(app_club()) . '"></div><div class="col"><label class="form-label">Visitante</label><input class="form-control" name="away" required></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Uniforme</label><input class="form-control" name="kit_used"></div><div class="col"><label class="form-label">Clima</label><input class="form-control" name="weather"></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Gols mandante</label><input class="form-control" type="number" name="home_score"></div><div class="col"><label class="form-label">Gols visitante</label><input class="form-control" type="number" name="away_score"></div></div>';
+echo '<button class="btn btn-success">Salvar</button>';
+echo '</form>';
+
+echo '<div class="text-muted small mt-3">Depois de criar, abra a partida para ficha técnica (escalações, substituições, notas e estatísticas).</div>';
+echo '</div></div>';
+
+echo '<div class="col-lg-8"><div class="card card-soft p-3">';
+echo '<div class="d-flex justify-content-between align-items-center mb-2"><div class="fw-bold">Partidas</div><div class="text-muted small">' . count($rows) . '</div></div>';
+echo '<div class="table-responsive"><table class="table table-sm align-middle mb-0">';
+echo '<thead><tr><th>Data</th><th>Comp.</th><th>Jogo</th><th class="text-end">Placar</th><th></th></tr></thead><tbody>';
+
+foreach ($rows as $r) {
+  $pl = ($r['home_score'] === null || $r['away_score'] === null) ? '-' : ((int)$r['home_score'] . ' - ' . (int)$r['away_score']);
+  echo '<tr>';
+  echo '<td>' . h($r['match_date']) . '</td>';
+  echo '<td>' . h($r['competition']) . '</td>';
+  echo '<td>' . h($r['home']) . ' x ' . h($r['away']) . '</td>';
+  echo '<td class="text-end fw-bold">' . h($pl) . '</td>';
+  echo '<td class="text-end">';
+  echo '<a class="btn btn-sm btn-outline-primary" href="/?page=match&id=' . (int)$r['id'] . '">Abrir</a> ';
+  echo '<a class="btn btn-sm btn-outline-danger" href="/?page=matches&del=' . (int)$r['id'] . '" onclick="return confirm(\'Excluir partida?\')">Excluir</a>';
+  echo '</td>';
+  echo '</tr>';
+}
+
+echo '</tbody></table></div>';
+echo '</div></div>';
+echo '</div>';
+
+render_footer();
+GET['err'] ?? '');
+if ($err === 'palmeiras_only') {
+  echo '<div class="alert alert-warning card-soft">Este sistema aceita apenas partidas onde o <b>PALMEIRAS</b> é mandante ou visitante.</div>';
+}
+echo '<div class="row g-3">';
+echo '<div class="col-lg-4"><div class="card card-soft p-3">';
+echo '<div class="fw-bold mb-2">Nova partida</div>';
+
+echo '<form method="post" class="vstack gap-2">';
+echo '<div><label class="form-label">Temporada</label><input class="form-control" name="season" required placeholder="2026"></div>';
+echo '<div><label class="form-label">Campeonato</label><input class="form-control" name="competition" required placeholder="Paulistão / Brasileirão..."></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Fase</label><input class="form-control" name="phase"></div><div class="col"><label class="form-label">Rodada</label><input class="form-control" name="round"></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Data</label><input class="form-control" type="date" name="match_date" required></div><div class="col"><label class="form-label">Horário</label><input class="form-control" type="time" name="match_time"></div></div>';
+echo '<div><label class="form-label">Estádio</label><input class="form-control" name="stadium"></div>';
+echo '<div><label class="form-label">Árbitro</label><input class="form-control" name="referee"></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Mandante</label><input class="form-control" name="home" required value="' . h(app_club()) . '"></div><div class="col"><label class="form-label">Visitante</label><input class="form-control" name="away" required></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Uniforme</label><input class="form-control" name="kit_used"></div><div class="col"><label class="form-label">Clima</label><input class="form-control" name="weather"></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Gols mandante</label><input class="form-control" type="number" name="home_score"></div><div class="col"><label class="form-label">Gols visitante</label><input class="form-control" type="number" name="away_score"></div></div>';
+echo '<button class="btn btn-success">Salvar</button>';
+echo '</form>';
+
+echo '<div class="text-muted small mt-3">Depois de criar, abra a partida para ficha técnica (escalações, substituições, notas e estatísticas).</div>';
+echo '</div></div>';
+
+echo '<div class="col-lg-8"><div class="card card-soft p-3">';
+echo '<div class="d-flex justify-content-between align-items-center mb-2"><div class="fw-bold">Partidas</div><div class="text-muted small">' . count($rows) . '</div></div>';
+echo '<div class="table-responsive"><table class="table table-sm align-middle mb-0">';
+echo '<thead><tr><th>Data</th><th>Comp.</th><th>Jogo</th><th class="text-end">Placar</th><th></th></tr></thead><tbody>';
+
+foreach ($rows as $r) {
+  $pl = ($r['home_score'] === null || $r['away_score'] === null) ? '-' : ((int)$r['home_score'] . ' - ' . (int)$r['away_score']);
+  echo '<tr>';
+  echo '<td>' . h($r['match_date']) . '</td>';
+  echo '<td>' . h($r['competition']) . '</td>';
+  echo '<td>' . h($r['home']) . ' x ' . h($r['away']) . '</td>';
+  echo '<td class="text-end fw-bold">' . h($pl) . '</td>';
+  echo '<td class="text-end">';
+  echo '<a class="btn btn-sm btn-outline-primary" href="/?page=match&id=' . (int)$r['id'] . '">Abrir</a> ';
+  echo '<a class="btn btn-sm btn-outline-danger" href="/?page=matches&del=' . (int)$r['id'] . '" onclick="return confirm(\'Excluir partida?\')">Excluir</a>';
+  echo '</td>';
+  echo '</tr>';
+}
+
+echo '</tbody></table></div>';
+echo '</div></div>';
+echo '</div>';
+
+render_footer();SERVER['REQUEST_METHOD'] === 'POST') {
+  // Palmeiras-only (backend): bloqueia qualquer jogo que não tenha PALMEIRAS
+  $homeCheck = trim((string)(<?php
+declare(strict_types=1);
+$pdo = db();
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+  $season = trim((string)($_POST['season'] ?? ''));
+  $competition = trim((string)($_POST['competition'] ?? ''));
+  $phase = trim((string)($_POST['phase'] ?? ''));
+  $round = trim((string)($_POST['round'] ?? ''));
+  $date = trim((string)($_POST['match_date'] ?? ''));
+  $time = trim((string)($_POST['match_time'] ?? ''));
+  $stadium = trim((string)($_POST['stadium'] ?? ''));
+  $referee = trim((string)($_POST['referee'] ?? ''));
+  $home = trim((string)($_POST['home'] ?? ''));
+  $away = trim((string)($_POST['away'] ?? ''));
+  $kit = trim((string)($_POST['kit_used'] ?? ''));
+  $weather = trim((string)($_POST['weather'] ?? ''));
+  $hs = ($_POST['home_score'] ?? '') === '' ? null : (int)$_POST['home_score'];
+  $as = ($_POST['away_score'] ?? '') === '' ? null : (int)$_POST['away_score'];
+
+  if ($season !== '' && $competition !== '' && $date !== '' && $home !== '' && $away !== '') {
+    q($pdo, "INSERT INTO matches(season,competition,phase,round,match_date,match_time,stadium,referee,home,away,kit_used,weather,home_score,away_score)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      [$season,$competition,$phase,$round,$date,$time,$stadium,$referee,$home,$away,$kit,$weather,$hs,$as]);
+  }
+  redirect('/?page=matches');
+}
+
+if (isset($_GET['del'])) {
+  q($pdo, "DELETE FROM matches WHERE id=?", [(int)$_GET['del']]);
+  redirect('/?page=matches');
+}
+
+$rows = q($pdo, "SELECT * FROM matches ORDER BY match_date DESC, id DESC")->fetchAll();
+
+render_header('Partidas');
+
+echo '<div class="row g-3">';
+echo '<div class="col-lg-4"><div class="card card-soft p-3">';
+echo '<div class="fw-bold mb-2">Nova partida</div>';
+
+echo '<form method="post" class="vstack gap-2">';
+echo '<div><label class="form-label">Temporada</label><input class="form-control" name="season" required placeholder="2026"></div>';
+echo '<div><label class="form-label">Campeonato</label><input class="form-control" name="competition" required placeholder="Paulistão / Brasileirão..."></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Fase</label><input class="form-control" name="phase"></div><div class="col"><label class="form-label">Rodada</label><input class="form-control" name="round"></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Data</label><input class="form-control" type="date" name="match_date" required></div><div class="col"><label class="form-label">Horário</label><input class="form-control" type="time" name="match_time"></div></div>';
+echo '<div><label class="form-label">Estádio</label><input class="form-control" name="stadium"></div>';
+echo '<div><label class="form-label">Árbitro</label><input class="form-control" name="referee"></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Mandante</label><input class="form-control" name="home" required value="' . h(app_club()) . '"></div><div class="col"><label class="form-label">Visitante</label><input class="form-control" name="away" required></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Uniforme</label><input class="form-control" name="kit_used"></div><div class="col"><label class="form-label">Clima</label><input class="form-control" name="weather"></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Gols mandante</label><input class="form-control" type="number" name="home_score"></div><div class="col"><label class="form-label">Gols visitante</label><input class="form-control" type="number" name="away_score"></div></div>';
+echo '<button class="btn btn-success">Salvar</button>';
+echo '</form>';
+
+echo '<div class="text-muted small mt-3">Depois de criar, abra a partida para ficha técnica (escalações, substituições, notas e estatísticas).</div>';
+echo '</div></div>';
+
+echo '<div class="col-lg-8"><div class="card card-soft p-3">';
+echo '<div class="d-flex justify-content-between align-items-center mb-2"><div class="fw-bold">Partidas</div><div class="text-muted small">' . count($rows) . '</div></div>';
+echo '<div class="table-responsive"><table class="table table-sm align-middle mb-0">';
+echo '<thead><tr><th>Data</th><th>Comp.</th><th>Jogo</th><th class="text-end">Placar</th><th></th></tr></thead><tbody>';
+
+foreach ($rows as $r) {
+  $pl = ($r['home_score'] === null || $r['away_score'] === null) ? '-' : ((int)$r['home_score'] . ' - ' . (int)$r['away_score']);
+  echo '<tr>';
+  echo '<td>' . h($r['match_date']) . '</td>';
+  echo '<td>' . h($r['competition']) . '</td>';
+  echo '<td>' . h($r['home']) . ' x ' . h($r['away']) . '</td>';
+  echo '<td class="text-end fw-bold">' . h($pl) . '</td>';
+  echo '<td class="text-end">';
+  echo '<a class="btn btn-sm btn-outline-primary" href="/?page=match&id=' . (int)$r['id'] . '">Abrir</a> ';
+  echo '<a class="btn btn-sm btn-outline-danger" href="/?page=matches&del=' . (int)$r['id'] . '" onclick="return confirm(\'Excluir partida?\')">Excluir</a>';
+  echo '</td>';
+  echo '</tr>';
+}
+
+echo '</tbody></table></div>';
+echo '</div></div>';
+echo '</div>';
+
+render_footer();POST['home'] ?? ''));
+  $awayCheck = trim((string)(<?php
+declare(strict_types=1);
+$pdo = db();
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+  $season = trim((string)($_POST['season'] ?? ''));
+  $competition = trim((string)($_POST['competition'] ?? ''));
+  $phase = trim((string)($_POST['phase'] ?? ''));
+  $round = trim((string)($_POST['round'] ?? ''));
+  $date = trim((string)($_POST['match_date'] ?? ''));
+  $time = trim((string)($_POST['match_time'] ?? ''));
+  $stadium = trim((string)($_POST['stadium'] ?? ''));
+  $referee = trim((string)($_POST['referee'] ?? ''));
+  $home = trim((string)($_POST['home'] ?? ''));
+  $away = trim((string)($_POST['away'] ?? ''));
+  $kit = trim((string)($_POST['kit_used'] ?? ''));
+  $weather = trim((string)($_POST['weather'] ?? ''));
+  $hs = ($_POST['home_score'] ?? '') === '' ? null : (int)$_POST['home_score'];
+  $as = ($_POST['away_score'] ?? '') === '' ? null : (int)$_POST['away_score'];
+
+  if ($season !== '' && $competition !== '' && $date !== '' && $home !== '' && $away !== '') {
+    q($pdo, "INSERT INTO matches(season,competition,phase,round,match_date,match_time,stadium,referee,home,away,kit_used,weather,home_score,away_score)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      [$season,$competition,$phase,$round,$date,$time,$stadium,$referee,$home,$away,$kit,$weather,$hs,$as]);
+  }
+  redirect('/?page=matches');
+}
+
+if (isset($_GET['del'])) {
+  q($pdo, "DELETE FROM matches WHERE id=?", [(int)$_GET['del']]);
+  redirect('/?page=matches');
+}
+
+$rows = q($pdo, "SELECT * FROM matches ORDER BY match_date DESC, id DESC")->fetchAll();
+
+render_header('Partidas');
+
+echo '<div class="row g-3">';
+echo '<div class="col-lg-4"><div class="card card-soft p-3">';
+echo '<div class="fw-bold mb-2">Nova partida</div>';
+
+echo '<form method="post" class="vstack gap-2">';
+echo '<div><label class="form-label">Temporada</label><input class="form-control" name="season" required placeholder="2026"></div>';
+echo '<div><label class="form-label">Campeonato</label><input class="form-control" name="competition" required placeholder="Paulistão / Brasileirão..."></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Fase</label><input class="form-control" name="phase"></div><div class="col"><label class="form-label">Rodada</label><input class="form-control" name="round"></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Data</label><input class="form-control" type="date" name="match_date" required></div><div class="col"><label class="form-label">Horário</label><input class="form-control" type="time" name="match_time"></div></div>';
+echo '<div><label class="form-label">Estádio</label><input class="form-control" name="stadium"></div>';
+echo '<div><label class="form-label">Árbitro</label><input class="form-control" name="referee"></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Mandante</label><input class="form-control" name="home" required value="' . h(app_club()) . '"></div><div class="col"><label class="form-label">Visitante</label><input class="form-control" name="away" required></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Uniforme</label><input class="form-control" name="kit_used"></div><div class="col"><label class="form-label">Clima</label><input class="form-control" name="weather"></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Gols mandante</label><input class="form-control" type="number" name="home_score"></div><div class="col"><label class="form-label">Gols visitante</label><input class="form-control" type="number" name="away_score"></div></div>';
+echo '<button class="btn btn-success">Salvar</button>';
+echo '</form>';
+
+echo '<div class="text-muted small mt-3">Depois de criar, abra a partida para ficha técnica (escalações, substituições, notas e estatísticas).</div>';
+echo '</div></div>';
+
+echo '<div class="col-lg-8"><div class="card card-soft p-3">';
+echo '<div class="d-flex justify-content-between align-items-center mb-2"><div class="fw-bold">Partidas</div><div class="text-muted small">' . count($rows) . '</div></div>';
+echo '<div class="table-responsive"><table class="table table-sm align-middle mb-0">';
+echo '<thead><tr><th>Data</th><th>Comp.</th><th>Jogo</th><th class="text-end">Placar</th><th></th></tr></thead><tbody>';
+
+foreach ($rows as $r) {
+  $pl = ($r['home_score'] === null || $r['away_score'] === null) ? '-' : ((int)$r['home_score'] . ' - ' . (int)$r['away_score']);
+  echo '<tr>';
+  echo '<td>' . h($r['match_date']) . '</td>';
+  echo '<td>' . h($r['competition']) . '</td>';
+  echo '<td>' . h($r['home']) . ' x ' . h($r['away']) . '</td>';
+  echo '<td class="text-end fw-bold">' . h($pl) . '</td>';
+  echo '<td class="text-end">';
+  echo '<a class="btn btn-sm btn-outline-primary" href="/?page=match&id=' . (int)$r['id'] . '">Abrir</a> ';
+  echo '<a class="btn btn-sm btn-outline-danger" href="/?page=matches&del=' . (int)$r['id'] . '" onclick="return confirm(\'Excluir partida?\')">Excluir</a>';
+  echo '</td>';
+  echo '</tr>';
+}
+
+echo '</tbody></table></div>';
+echo '</div></div>';
+echo '</div>';
+
+render_footer();POST['away'] ?? ''));
+  if (($homeCheck !== '' || $awayCheck !== '') && $homeCheck !== app_club() && $awayCheck !== app_club()) {
+    redirect('/?page=matches&err=palmeiras_only');
+  }
+
+  $season = trim((string)($_POST['season'] ?? ''));
+  $competition = trim((string)($_POST['competition'] ?? ''));
+  $phase = trim((string)($_POST['phase'] ?? ''));
+  $round = trim((string)($_POST['round'] ?? ''));
+  $date = trim((string)($_POST['match_date'] ?? ''));
+  $time = trim((string)($_POST['match_time'] ?? ''));
+  $stadium = trim((string)($_POST['stadium'] ?? ''));
+  $referee = trim((string)($_POST['referee'] ?? ''));
+  $home = trim((string)($_POST['home'] ?? ''));
+  $away = trim((string)($_POST['away'] ?? ''));
+  $kit = trim((string)($_POST['kit_used'] ?? ''));
+  $weather = trim((string)($_POST['weather'] ?? ''));
+  $hs = ($_POST['home_score'] ?? '') === '' ? null : (int)$_POST['home_score'];
+  $as = ($_POST['away_score'] ?? '') === '' ? null : (int)$_POST['away_score'];
+
+  if ($season !== '' && $competition !== '' && $date !== '' && $home !== '' && $away !== '') {
+    q($pdo, "INSERT INTO matches(season,competition,phase,round,match_date,match_time,stadium,referee,home,away,kit_used,weather,home_score,away_score)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      [$season,$competition,$phase,$round,$date,$time,$stadium,$referee,$home,$away,$kit,$weather,$hs,$as]);
+  }
+  redirect('/?page=matches');
+}
+
+if (isset($_GET['del'])) {
+  q($pdo, "DELETE FROM matches WHERE id=?", [(int)$_GET['del']]);
+  redirect('/?page=matches');
+}
+
+$rows = q($pdo, "SELECT * FROM matches ORDER BY match_date DESC, id DESC")->fetchAll();
+
+render_header('Partidas');
+
+echo '<div class="row g-3">';
+echo '<div class="col-lg-4"><div class="card card-soft p-3">';
+echo '<div class="fw-bold mb-2">Nova partida</div>';
+
+echo '<form method="post" class="vstack gap-2">';
+echo '<div><label class="form-label">Temporada</label><input class="form-control" name="season" required placeholder="2026"></div>';
+echo '<div><label class="form-label">Campeonato</label><input class="form-control" name="competition" required placeholder="Paulistão / Brasileirão..."></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Fase</label><input class="form-control" name="phase"></div><div class="col"><label class="form-label">Rodada</label><input class="form-control" name="round"></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Data</label><input class="form-control" type="date" name="match_date" required></div><div class="col"><label class="form-label">Horário</label><input class="form-control" type="time" name="match_time"></div></div>';
+echo '<div><label class="form-label">Estádio</label><input class="form-control" name="stadium"></div>';
+echo '<div><label class="form-label">Árbitro</label><input class="form-control" name="referee"></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Mandante</label><input class="form-control" name="home" required value="' . h(app_club()) . '"></div><div class="col"><label class="form-label">Visitante</label><input class="form-control" name="away" required></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Uniforme</label><input class="form-control" name="kit_used"></div><div class="col"><label class="form-label">Clima</label><input class="form-control" name="weather"></div></div>';
+echo '<div class="row g-2"><div class="col"><label class="form-label">Gols mandante</label><input class="form-control" type="number" name="home_score"></div><div class="col"><label class="form-label">Gols visitante</label><input class="form-control" type="number" name="away_score"></div></div>';
+echo '<button class="btn btn-success">Salvar</button>';
+echo '</form>';
+
+echo '<div class="text-muted small mt-3">Depois de criar, abra a partida para ficha técnica (escalações, substituições, notas e estatísticas).</div>';
+echo '</div></div>';
+
+echo '<div class="col-lg-8"><div class="card card-soft p-3">';
+echo '<div class="d-flex justify-content-between align-items-center mb-2"><div class="fw-bold">Partidas</div><div class="text-muted small">' . count($rows) . '</div></div>';
+echo '<div class="table-responsive"><table class="table table-sm align-middle mb-0">';
+echo '<thead><tr><th>Data</th><th>Comp.</th><th>Jogo</th><th class="text-end">Placar</th><th></th></tr></thead><tbody>';
+
+foreach ($rows as $r) {
+  $pl = ($r['home_score'] === null || $r['away_score'] === null) ? '-' : ((int)$r['home_score'] . ' - ' . (int)$r['away_score']);
+  echo '<tr>';
+  echo '<td>' . h($r['match_date']) . '</td>';
+  echo '<td>' . h($r['competition']) . '</td>';
+  echo '<td>' . h($r['home']) . ' x ' . h($r['away']) . '</td>';
+  echo '<td class="text-end fw-bold">' . h($pl) . '</td>';
+  echo '<td class="text-end">';
+  echo '<a class="btn btn-sm btn-outline-primary" href="/?page=match&id=' . (int)$r['id'] . '">Abrir</a> ';
+  echo '<a class="btn btn-sm btn-outline-danger" href="/?page=matches&del=' . (int)$r['id'] . '" onclick="return confirm(\'Excluir partida?\')">Excluir</a>';
+  echo '</td>';
+  echo '</tr>';
+}
+
+echo '</tbody></table></div>';
+echo '</div></div>';
+echo '</div>';
+
+render_footer();
+
+
