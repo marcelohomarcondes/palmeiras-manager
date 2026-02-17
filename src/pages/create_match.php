@@ -44,19 +44,26 @@ $positions = ['GOL','ZAG','LD','LE','ALD','ALE','VOL','MC','ME','MD','MEI','PD',
 $kits      = ['Home','Away','Third','Alternativo 1','Alternativo 2','Alternativo 3'];
 $weathers  = ['Limpo','Parcialmente limpo','Nublado','Chuva','Neve'];
 
+/**
+ * Campeonatos (conforme você definiu)
+ */
 $competitions = [
-  'PAULISTÃO CASAS BAHIA',
-  'BRASILEIRÃO BETANO',
-  'COPA BETANO DO BRASIL',
-  'SUPERCOPA REI SUPERBET',
-  'CONMEBOL LIBERTADORES',
-  'CONMEBOL SULAMERICANA',
-  'CONMEBOL RECOPA',
+  'Paulistão Casas Bahia',
+  'Brasileirão Betano',
+  'Copa Betano do Brasil',
+  'CONMEBOL Libertadores',
+  'CONMEBOL Sul-Americana',
+  'CONMEBOL Recopa',
+  'Supercopa do Brasil',
+  'Intercontinental FIFA',
+  'Copa do Mundo de Clubes da FIFA',
 ];
 
-$curY = (int)date('Y');
+/**
+ * Temporadas: 2026 a 2040
+ */
 $seasons = [];
-for ($y = $curY - 2; $y <= $curY + 2; $y++) $seasons[] = (string)$y;
+for ($y = 2026; $y <= 2040; $y++) $seasons[] = (string)$y;
 
 $err = trim((string)($_GET['err'] ?? ''));
 $msg = trim((string)($_GET['msg'] ?? ''));
@@ -150,6 +157,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
   $home        = trim((string)($_POST['home'] ?? ''));
   $away        = trim((string)($_POST['away'] ?? ''));
 
+  // Placar (opcional)
   $hsRaw = trim((string)($_POST['home_score'] ?? ''));
   $asRaw = trim((string)($_POST['away_score'] ?? ''));
   $home_score = ($hsRaw === '') ? null : (int)$hsRaw;
@@ -162,6 +170,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     redirect('?page=create_match&err=palmeiras_only');
   }
 
+  // valida obrigatórios
   if ($season === '' || $competition === '' || $date === '' || $home === '' || $away === '' || strcasecmp($home, $away) === 0) {
     redirect('?page=create_match&err=invalid');
   }
@@ -169,6 +178,13 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     redirect('?page=create_match&err=invalid');
   }
 
+  // garante que temporada está no range 2026..2040 (defesa extra)
+  $sInt = (int)$season;
+  if ($sInt < 2026 || $sInt > 2040) {
+    redirect('?page=create_match&err=invalid');
+  }
+
+  // valida ano da data vs temporada
   $year = substr($date, 0, 4);
   if ($year !== $season) {
     redirect('?page=create_match&err=season_mismatch');
@@ -176,6 +192,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 
   $oppClub = $isHomePal ? $away : $home;
 
+  // precisa ter pelo menos 1 do Palmeiras e 1 do adversário
   $hasPal = false;
   $hasOpp = false;
 
@@ -318,7 +335,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 
     $pdo->commit();
 
-    pm_log('INFO', "Partida cadastrada com sucesso. match_id=$matchId home=$home away=$away date=$date");
+    pm_log('INFO', "Partida cadastrada com sucesso. match_id=$matchId home=$home away=$away date=$date season=$season competition=$competition");
     redirect('?page=matches&msg=saved');
 
   } catch (Throwable $e) {
@@ -341,7 +358,7 @@ $players = q($pdo, "
 
 render_header('Cadastrar partida');
 
-// Descobrir o nome do adversário (pra mostrar no cabeçalho da coluna direita)
+// Descobrir o nome do adversário (para título da coluna direita)
 $homeName = fval('home');
 $awayName = fval('away');
 $oppTitle = 'Adversário';
@@ -395,7 +412,7 @@ echo <<<HTML
 }
 .pm-roster-table thead th{ position: sticky; top: 0; z-index: 1; }
 
-/* Em telas grandes, cada lado pode precisar de rolagem horizontal interna, sem esmagar colunas */
+/* Em telas grandes, evita esmagar as colunas e mantém scroll interno */
 @media (min-width: 1200px){
   .pm-roster-table { min-width: 860px; }
 }
