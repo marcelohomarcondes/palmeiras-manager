@@ -15,7 +15,7 @@ $troph = (int)scalar($pdo, "SELECT COUNT(*) FROM trophies");
 
 render_header('Dashboard');
 
-echo '<div class="row g-3">';
+echo '<div class="row row-cols-1 row-cols-sm-2 row-cols-lg-5 g-3">';
 $cards = [
   ['Partidas', $games, 'bi-calendar3', '/?page=matches'],
   ['Elenco ativo', $players, 'bi-people', '/?page=players'],
@@ -25,7 +25,7 @@ $cards = [
 ];
 
 foreach ($cards as [$label,$val,$icon,$href]) {
-  echo '<div class="col-md-4 col-lg-3">';
+  echo '<div class="col">';
   echo '<a class="text-decoration-none" href="' . h($href) . '">';
   echo '<div class="card card-soft p-3 h-100">';
   echo '<div class="d-flex align-items-center justify-content-between">';
