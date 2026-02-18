@@ -1,7 +1,16 @@
 <?php
+// src/bootstrap.php
 declare(strict_types=1);
 
-require_once __DIR__ . '/db.php';
-require_once __DIR__ . '/layout.php';
+/**
+ * Bootstrap do projeto
+ * - Carrega db.php e garante $pdo disponível
+ */
 
-date_default_timezone_set('America/Sao_Paulo');
+require_once __DIR__ . '/db.php';
+
+// redundância segura: se db.php já setou, ok.
+// se alguma outra coisa mexer, ainda garantimos.
+if (!isset($pdo) || !($pdo instanceof PDO)) {
+    $pdo = db();
+}
