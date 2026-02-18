@@ -69,7 +69,7 @@ echo '<a class="btn btn-outline-primary" href="/?page=players">Gerenciar elenco<
 echo '<a class="btn btn-outline-secondary" href="/?page=stats">Relatórios estatísticos</a>';
 echo '<a class="btn btn-outline-secondary" href="/?page=opponents">Consolidado vs adversários</a>';
 echo '</div>';
-echo '<div class="text-muted small mt-3">Se algo “sumir”, rode novamente: <span class="mono">php src/migrate.php</span></div>';
+// echo '<div class="text-muted small mt-3">Se algo “sumir”, rode novamente: <span class="mono">php src/migrate.php</span></div>';
 echo '</div></div>';
 
 echo '</div>';

@@ -23,6 +23,7 @@ function render_header(string $title): void {
     'dashboard'  => ['Dashboard', 'bi-speedometer2'],
     'matches'    => ['Partidas', 'bi-calendar3'],
     'players'    => ['Elenco', 'bi-people'],
+    'crias'      => ['Crias Da Academia', 'bi-mortarboard'],
     'templates'  => ['Templates', 'bi-layout-text-window'],
     'transfers'  => ['Transferências', 'bi-arrow-left-right'],
     'injuries'   => ['Lesões', 'bi-bandaid'],
@@ -392,7 +393,7 @@ select[data-pro-select="1"] {
   echo '<div class="d-flex align-items-center justify-content-between mb-3">';
   echo '<div>';
   echo '<div class="fw-bold fs-3">Palmeiras Manager</div>';
-  echo '<div class="text-muted small">PRO • PHP + SQLite</div>';
+  // echo '<div class="text-muted small">PRO • PHP + SQLite</div>';
   echo '</div>';
 
   echo '<div class="d-flex align-items-center gap-3">';

@@ -25,6 +25,7 @@ $routes = [
   'trophies'     => __DIR__ . '/../src/pages/trophies.php',
   'opponents'    => __DIR__ . '/../src/pages/opponents.php',
   'stats'        => __DIR__ . '/../src/pages/stats.php',
+  'crias'        => __DIR__ . '/../src/pages/crias.php',
 ];
 
 if (!isset($routes[$page])) {
