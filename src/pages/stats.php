@@ -529,6 +529,179 @@ usort($tmp, fn($a,$b)=> ($b['gf'] <=> $a['gf']) ?: ($b['diff'] <=> $a['diff']) ?
 $topWinsByGF = array_slice($tmp, 0, 10);
 
 // -----------------------------------------------------------------------------
+// Gráficos (datasets prontos)
+// -----------------------------------------------------------------------------
+$chart = [
+  'meta' => [
+    'club' => $club,
+    'season' => $season,
+    'competition' => $competition,
+    'count' => count($matches),
+  ],
+  'wdl' => [
+    'labels' => ['Vitórias','Empates','Derrotas'],
+    'values' => [(int)$summary['wins'], (int)$summary['draws'], (int)$summary['losses'],
+    ],
+  ],
+  'timeline' => [
+    'labels' => [],
+    'points_cum' => [],
+    'gd_cum' => [],
+    'gf' => [],
+    'ga' => [],
+  ],
+  'homeaway' => [
+    'labels' => ['Mandante','Visitante'],
+    'ppj' => [],
+    'gf' => [],
+    'ga' => [],
+    'gd' => [],
+  ],
+  'opponents' => [
+    'labels' => [],
+    'played' => [],
+    'ppj' => [],
+  ],
+  'kits' => [
+    'labels' => [],
+    'played' => [],
+    'ppj' => [],
+  ],
+  'phases' => [
+    'labels' => [],
+    'ppj' => [],
+  ],
+  'weathers' => [
+    'labels' => [],
+    'ppj' => [],
+  ],
+  'players' => [
+    'games_top10' => ['labels'=>[],'values'=>[]],
+    'consec_top10' => ['labels'=>[],'values'=>[]],
+    'cleans_top10' => ['labels'=>[],'values'=>[]],
+    'scorers_top10' => ['labels'=>[],'values'=>[]],
+    'assists_top10' => ['labels'=>[],'values'=>[]],
+    'has_player_stats' => $mpStatsAvailable,
+  ],
+  'score_bubble' => [
+    'points' => [], // {x: gf, y: ga, r: radius, v: count, label: '3x0'}
+    'max_gf' => 0,
+    'max_ga' => 0,
+  ],
+];
+
+$pCum = 0;
+$gdCum = 0;
+foreach ($matches as $m) {
+  $gf = (int)$m['gf'];
+  $ga = (int)$m['ga'];
+
+  $pts = 0;
+  if ($gf > $ga) $pts = 3;
+  elseif ($gf === $ga) $pts = 1;
+
+  $pCum += $pts;
+  $gdCum += ($gf - $ga);
+
+  $label = (string)$m['match_date'];
+  $opp = trim((string)$m['opponent']);
+  if ($opp !== '') $label .= ' • ' . $opp;
+
+  $chart['timeline']['labels'][] = $label;
+  $chart['timeline']['points_cum'][] = $pCum;
+  $chart['timeline']['gd_cum'][] = $gdCum;
+  $chart['timeline']['gf'][] = $gf;
+  $chart['timeline']['ga'][] = $ga;
+}
+
+$ppjHome = $homeAway['home']['played'] > 0 ? round($homeAway['home']['points'] / $homeAway['home']['played'], 2) : 0.0;
+$ppjAway = $homeAway['away']['played'] > 0 ? round($homeAway['away']['points'] / $homeAway['away']['played'], 2) : 0.0;
+$chart['homeaway']['ppj'] = [$ppjHome, $ppjAway];
+$chart['homeaway']['gf'] = [(int)$homeAway['home']['gf'], (int)$homeAway['away']['gf']];
+$chart['homeaway']['ga'] = [(int)$homeAway['home']['ga'], (int)$homeAway['away']['ga']];
+$chart['homeaway']['gd'] = [(int)$homeAway['home']['gd'], (int)$homeAway['away']['gd']];
+
+foreach ($oppMostPlayed as $r) {
+  $ppj = (int)$r['played'] > 0 ? round(((int)$r['wins']*3 + (int)$r['draws']) / (int)$r['played'], 2) : 0.0;
+  $chart['opponents']['labels'][] = (string)$r['label'];
+  $chart['opponents']['played'][] = (int)$r['played'];
+  $chart['opponents']['ppj'][] = $ppj;
+}
+
+foreach ($kitRank as $r) {
+  $ppj = (int)$r['played'] > 0 ? round(((int)$r['points']) / (int)$r['played'], 2) : 0.0;
+  $chart['kits']['labels'][] = (string)$r['label'];
+  $chart['kits']['played'][] = (int)$r['played'];
+  $chart['kits']['ppj'][] = $ppj;
+}
+
+foreach ($phaseRank as $r) {
+  $ppj = (int)$r['played'] > 0 ? round(((int)$r['points']) / (int)$r['played'], 2) : 0.0;
+  $chart['phases']['labels'][] = (string)$r['label'];
+  $chart['phases']['ppj'][] = $ppj;
+}
+
+foreach ($weatherRank as $r) {
+  $ppj = (int)$r['played'] > 0 ? round(((int)$r['points']) / (int)$r['played'], 2) : 0.0;
+  $chart['weathers']['labels'][] = (string)$r['label'];
+  $chart['weathers']['ppj'][] = $ppj;
+}
+
+// Players charts (top10)
+$tg = array_slice($topGames100, 0, 10);
+foreach ($tg as $r) {
+  $chart['players']['games_top10']['labels'][] = (string)$r['player_name'];
+  $chart['players']['games_top10']['values'][] = (int)$r['games'];
+}
+
+$tc = array_slice($topConsecutiveGames, 0, 10);
+foreach ($tc as $r) {
+  $chart['players']['consec_top10']['labels'][] = (string)$r['player_name'];
+  $chart['players']['consec_top10']['values'][] = (int)$r['streak'];
+}
+
+foreach ($topCleanSheets as $r) {
+  $chart['players']['cleans_top10']['labels'][] = (string)$r['player_name'];
+  $chart['players']['cleans_top10']['values'][] = (int)$r['clean_sheets'];
+}
+
+if ($mpStatsAvailable) {
+  foreach ($topScorers as $r) {
+    $chart['players']['scorers_top10']['labels'][] = (string)$r['player_name'];
+    $chart['players']['scorers_top10']['values'][] = (int)$r['goals'];
+  }
+  foreach ($topAssists as $r) {
+    $chart['players']['assists_top10']['labels'][] = (string)$r['player_name'];
+    $chart['players']['assists_top10']['values'][] = (int)$r['assists'];
+  }
+}
+
+// Scoreline "heatmap" (bubble)
+$maxGF = 0; $maxGA = 0;
+foreach ($scorelines as $k => $count) {
+  // k: "3x0"
+  $parts = explode('x', (string)$k);
+  $gf = isset($parts[0]) ? (int)$parts[0] : 0;
+  $ga = isset($parts[1]) ? (int)$parts[1] : 0;
+
+  $maxGF = max($maxGF, $gf);
+  $maxGA = max($maxGA, $ga);
+
+  // radius: escala simples, evita sumir bolhas pequenas
+  $r = 4 + min(18, (int)$count * 3);
+
+  $chart['score_bubble']['points'][] = [
+    'x' => $gf,
+    'y' => $ga,
+    'r' => $r,
+    'v' => (int)$count,
+    'label' => $k,
+  ];
+}
+$chart['score_bubble']['max_gf'] = $maxGF;
+$chart['score_bubble']['max_ga'] = $maxGA;
+
+// -----------------------------------------------------------------------------
 // Render (padrão matches.php)
 // -----------------------------------------------------------------------------
 render_header('Relatórios');
@@ -588,7 +761,197 @@ echo '</div>';
 
 echo '</div>';
 
-// Mandante x Visitante
+// -----------------------------------------------------------------------------
+// Painel de GRÁFICOS (todos)
+// -----------------------------------------------------------------------------
+echo '<div class="card-soft mb-3 p-3">';
+echo '  <div class="d-flex justify-content-between align-items-center mb-2">';
+echo '    <h5 class="mb-0">Gráficos</h5>';
+echo '    <div class="text-muted small">Chart.js (sem build) • Baseado no filtro aplicado</div>';
+echo '  </div>';
+
+echo '  <div class="accordion" id="accStatsCharts">';
+
+// Visão Geral
+echo '    <div class="accordion-item">';
+echo '      <h2 class="accordion-header" id="accHead1">';
+echo '        <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#accCol1" aria-expanded="true" aria-controls="accCol1">';
+echo '          Visão Geral';
+echo '        </button>';
+echo '      </h2>';
+echo '      <div id="accCol1" class="accordion-collapse collapse show" aria-labelledby="accHead1" data-bs-parent="#accStatsCharts">';
+echo '        <div class="accordion-body">';
+
+echo '          <div class="row g-3">';
+echo '            <div class="col-12 col-xl-8">';
+echo '              <div class="card-soft p-3">';
+echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Pontos acumulados</b><span class="text-muted small">por partida</span></div>';
+echo '                <div style="height:280px"><canvas id="ch_points"></canvas></div>';
+echo '              </div>';
+echo '            </div>';
+echo '            <div class="col-12 col-xl-4">';
+echo '              <div class="card-soft p-3">';
+echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>V / E / D</b><span class="text-muted small">distribuição</span></div>';
+echo '                <div style="height:280px"><canvas id="ch_wdl"></canvas></div>';
+echo '              </div>';
+echo '            </div>';
+echo '          </div>';
+
+echo '          <div class="row g-3 mt-0">';
+echo '            <div class="col-12">';
+echo '              <div class="card-soft p-3">';
+echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Saldo acumulado</b><span class="text-muted small">(GF-GA) acumulado</span></div>';
+echo '                <div style="height:260px"><canvas id="ch_gd"></canvas></div>';
+echo '              </div>';
+echo '            </div>';
+echo '          </div>';
+
+echo '        </div>';
+echo '      </div>';
+echo '    </div>';
+
+// Ataque & Defesa
+echo '    <div class="accordion-item">';
+echo '      <h2 class="accordion-header" id="accHead2">';
+echo '        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#accCol2" aria-expanded="false" aria-controls="accCol2">';
+echo '          Ataque & Defesa';
+echo '        </button>';
+echo '      </h2>';
+echo '      <div id="accCol2" class="accordion-collapse collapse" aria-labelledby="accHead2" data-bs-parent="#accStatsCharts">';
+echo '        <div class="accordion-body">';
+
+echo '          <div class="row g-3">';
+echo '            <div class="col-12">';
+echo '              <div class="card-soft p-3">';
+echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>GF e GA por jogo</b><span class="text-muted small">barras</span></div>';
+echo '                <div style="height:320px"><canvas id="ch_gfga"></canvas></div>';
+echo '              </div>';
+echo '            </div>';
+echo '          </div>';
+
+echo '          <div class="row g-3 mt-0">';
+echo '            <div class="col-12 col-xl-6">';
+echo '              <div class="card-soft p-3">';
+echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Placar mais comum</b><span class="text-muted small">GF x GA (bolhas)</span></div>';
+echo '                <div style="height:300px"><canvas id="ch_scorebubble"></canvas></div>';
+echo '              </div>';
+echo '            </div>';
+echo '            <div class="col-12 col-xl-6">';
+echo '              <div class="card-soft p-3">';
+echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Mandante x Visitante</b><span class="text-muted small">PPJ / GF / GA</span></div>';
+echo '                <div style="height:300px"><canvas id="ch_homeaway"></canvas></div>';
+echo '              </div>';
+echo '            </div>';
+echo '          </div>';
+
+echo '        </div>';
+echo '      </div>';
+echo '    </div>';
+
+// Contexto
+echo '    <div class="accordion-item">';
+echo '      <h2 class="accordion-header" id="accHead3">';
+echo '        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#accCol3" aria-expanded="false" aria-controls="accCol3">';
+echo '          Contexto (adversários / uniformes / fase / clima)';
+echo '        </button>';
+echo '      </h2>';
+echo '      <div id="accCol3" class="accordion-collapse collapse" aria-labelledby="accHead3" data-bs-parent="#accStatsCharts">';
+echo '        <div class="accordion-body">';
+
+echo '          <div class="row g-3">';
+echo '            <div class="col-12 col-xl-6">';
+echo '              <div class="card-soft p-3">';
+echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Top adversários</b><span class="text-muted small">J + PPJ</span></div>';
+echo '                <div style="height:320px"><canvas id="ch_opponents"></canvas></div>';
+echo '              </div>';
+echo '            </div>';
+echo '            <div class="col-12 col-xl-6">';
+echo '              <div class="card-soft p-3">';
+echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Uniformes</b><span class="text-muted small">J + PPJ</span></div>';
+echo '                <div style="height:320px"><canvas id="ch_kits"></canvas></div>';
+echo '              </div>';
+echo '            </div>';
+echo '          </div>';
+
+echo '          <div class="row g-3 mt-0">';
+echo '            <div class="col-12 col-xl-6">';
+echo '              <div class="card-soft p-3">';
+echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Fases</b><span class="text-muted small">PPJ</span></div>';
+echo '                <div style="height:280px"><canvas id="ch_phases"></canvas></div>';
+echo '              </div>';
+echo '            </div>';
+echo '            <div class="col-12 col-xl-6">';
+echo '              <div class="card-soft p-3">';
+echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Clima</b><span class="text-muted small">PPJ</span></div>';
+echo '                <div style="height:280px"><canvas id="ch_weather"></canvas></div>';
+echo '              </div>';
+echo '            </div>';
+echo '          </div>';
+
+echo '        </div>';
+echo '      </div>';
+echo '    </div>';
+
+// Elenco
+echo '    <div class="accordion-item">';
+echo '      <h2 class="accordion-header" id="accHead4">';
+echo '        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#accCol4" aria-expanded="false" aria-controls="accCol4">';
+echo '          Elenco (jogos / consecutivos / clean sheets / gols / assistências)';
+echo '        </button>';
+echo '      </h2>';
+echo '      <div id="accCol4" class="accordion-collapse collapse" aria-labelledby="accHead4" data-bs-parent="#accStatsCharts">';
+echo '        <div class="accordion-body">';
+
+echo '          <div class="row g-3">';
+echo '            <div class="col-12 col-xl-6">';
+echo '              <div class="card-soft p-3">';
+echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Top 10 - Mais jogos</b><span class="text-muted small">entered=1</span></div>';
+echo '                <div style="height:320px"><canvas id="ch_players_games"></canvas></div>';
+echo '              </div>';
+echo '            </div>';
+echo '            <div class="col-12 col-xl-6">';
+echo '              <div class="card-soft p-3">';
+echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Top 10 - Mais consecutivos</b><span class="text-muted small">streak</span></div>';
+echo '                <div style="height:320px"><canvas id="ch_players_consec"></canvas></div>';
+echo '              </div>';
+echo '            </div>';
+echo '          </div>';
+
+echo '          <div class="row g-3 mt-0">';
+echo '            <div class="col-12 col-xl-4">';
+echo '              <div class="card-soft p-3">';
+echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Top 10 - Clean sheets (GK)</b><span class="text-muted small">GA=0</span></div>';
+echo '                <div style="height:300px"><canvas id="ch_players_cleans"></canvas></div>';
+echo '              </div>';
+echo '            </div>';
+echo '            <div class="col-12 col-xl-4">';
+echo '              <div class="card-soft p-3">';
+echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Top 10 - Gols</b><span class="text-muted small">se disponível</span></div>';
+echo '                <div style="height:300px"><canvas id="ch_players_goals"></canvas></div>';
+echo '              </div>';
+echo '            </div>';
+echo '            <div class="col-12 col-xl-4">';
+echo '              <div class="card-soft p-3">';
+echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Top 10 - Assistências</b><span class="text-muted small">se disponível</span></div>';
+echo '                <div style="height:300px"><canvas id="ch_players_assists"></canvas></div>';
+echo '              </div>';
+echo '            </div>';
+echo '          </div>';
+
+echo '          <div class="text-muted small mt-2">';
+echo '            Observação: Gols/Assistências dependem da tabela <code>match_player_stats</code> com colunas <code>goals</code>/<code>assists</code>.';
+echo '          </div>';
+
+echo '        </div>';
+echo '      </div>';
+echo '    </div>';
+
+echo '  </div>'; // accordion
+echo '</div>'; // card-soft
+
+// -----------------------------------------------------------------------------
+// Mandante x Visitante (tabela)
+// -----------------------------------------------------------------------------
 echo '<div class="card-soft mb-3 p-3">';
 echo '  <div class="d-flex justify-content-between align-items-center mb-2">';
 echo '    <h5 class="mb-0">Mandante x Visitante</h5>';
@@ -610,7 +973,7 @@ $rowsHA = [
 render_table(['Condição','J','V','E','D','GF','GA','SG','Pts','%'], $rowsHA, ['cond','played','wins','draws','losses','gf','ga','gd','points','pct'], 10);
 echo '</div>';
 
-// Seções principais
+// Seções principais (tabelas)
 echo '<div class="row g-3 mb-3">';
 
 echo '<div class="col-12 col-lg-6">';
@@ -629,7 +992,7 @@ echo '</div>';
 
 echo '</div>';
 
-// Artilheiros / Assistências
+// Artilheiros / Assistências (tabelas)
 echo '<div class="row g-3 mb-3">';
 
 echo '<div class="col-12 col-lg-6">';
@@ -763,5 +1126,177 @@ echo '  </div>';
 echo '</div>';
 
 echo '</div>';
+
+// -----------------------------------------------------------------------------
+// JS dos gráficos (ANTES do footer)
+// -----------------------------------------------------------------------------
+$chartJson = json_encode($chart, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+echo '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>';
+echo '<script>';
+echo 'window.PM_STATS = '.$chartJson.';';
+?>
+document.addEventListener('DOMContentLoaded', () => {
+  if (!window.Chart || !window.PM_STATS) return;
+
+  const S = window.PM_STATS;
+
+  // tenta respeitar tema (dark/light) via variável do bootstrap, sem hardcode de cor
+  const bodyStyle = getComputedStyle(document.body);
+  const bodyColor = (bodyStyle.getPropertyValue('--bs-body-color') || bodyStyle.color || '').trim();
+  if (bodyColor) Chart.defaults.color = bodyColor;
+
+  Chart.defaults.responsive = true;
+  Chart.defaults.maintainAspectRatio = false;
+
+  function el(id){ return document.getElementById(id); }
+
+  function mkLine(id, labels, datasets, extraOpts = {}) {
+    const c = el(id); if (!c) return;
+    return new Chart(c, {
+      type: 'line',
+      data: { labels, datasets },
+      options: Object.assign({
+        plugins: {
+          legend: { display: true },
+          tooltip: { mode: 'index', intersect: false },
+        },
+        interaction: { mode: 'nearest', axis: 'x', intersect: false },
+        scales: { x: { ticks: { maxRotation: 0, autoSkip: true } } },
+      }, extraOpts),
+    });
+  }
+
+  function mkBar(id, labels, datasets, extraOpts = {}) {
+    const c = el(id); if (!c) return;
+    return new Chart(c, {
+      type: 'bar',
+      data: { labels, datasets },
+      options: Object.assign({
+        plugins: { legend: { display: true } },
+        scales: { x: { ticks: { autoSkip: true } } },
+      }, extraOpts),
+    });
+  }
+
+  function mkHBar(id, labels, datasets, extraOpts = {}) {
+    const c = el(id); if (!c) return;
+    return new Chart(c, {
+      type: 'bar',
+      data: { labels, datasets },
+      options: Object.assign({
+        indexAxis: 'y',
+        plugins: { legend: { display: true } },
+        scales: { x: { beginAtZero: true } },
+      }, extraOpts),
+    });
+  }
+
+  function mkDoughnut(id, labels, data) {
+    const c = el(id); if (!c) return;
+    return new Chart(c, {
+      type: 'doughnut',
+      data: { labels, datasets: [{ label: 'Qtd', data }] },
+      options: { plugins: { legend: { position: 'bottom' } } },
+    });
+  }
+
+  // Visão Geral
+  mkLine('ch_points', S.timeline.labels, [
+    { label: 'Pontos acumulados', data: S.timeline.points_cum, tension: 0.25 },
+  ], { scales: { y: { beginAtZero: true } } });
+
+  mkDoughnut('ch_wdl', S.wdl.labels, S.wdl.values);
+
+  mkLine('ch_gd', S.timeline.labels, [
+    { label: 'Saldo acumulado', data: S.timeline.gd_cum, tension: 0.25 },
+  ]);
+
+  // Ataque & Defesa
+  mkBar('ch_gfga', S.timeline.labels, [
+    { label: 'GF', data: S.timeline.gf },
+    { label: 'GA', data: S.timeline.ga },
+  ], { scales: { y: { beginAtZero: true } } });
+
+  // Bubble: placares
+  (function(){
+    const c = el('ch_scorebubble'); if (!c) return;
+    const points = (S.score_bubble.points || []).map(p => ({ x: p.x, y: p.y, r: p.r, _v: p.v, _label: p.label }));
+    new Chart(c, {
+      type: 'bubble',
+      data: { datasets: [{ label: 'Placar (GF x GA)', data: points }] },
+      options: {
+        plugins: {
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const raw = ctx.raw || {};
+                return `${raw._label || ''} • Qtd: ${raw._v ?? ''}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: { title: { display: true, text: 'GF' }, beginAtZero: true, suggestedMax: (S.score_bubble.max_gf || 5) + 1, ticks: { stepSize: 1 } },
+          y: { title: { display: true, text: 'GA' }, beginAtZero: true, suggestedMax: (S.score_bubble.max_ga || 5) + 1, ticks: { stepSize: 1 } },
+        }
+      }
+    });
+  })();
+
+  // Home/Away (PPJ + GF/GA)
+  mkBar('ch_homeaway', S.homeaway.labels, [
+    { label: 'PPJ', data: S.homeaway.ppj },
+    { label: 'GF', data: S.homeaway.gf },
+    { label: 'GA', data: S.homeaway.ga },
+  ], { scales: { y: { beginAtZero: true } } });
+
+  // Contexto
+  mkHBar('ch_opponents', S.opponents.labels, [
+    { label: 'Jogos', data: S.opponents.played },
+    { label: 'PPJ', data: S.opponents.ppj },
+  ]);
+
+  mkHBar('ch_kits', S.kits.labels, [
+    { label: 'Jogos', data: S.kits.played },
+    { label: 'PPJ', data: S.kits.ppj },
+  ]);
+
+  mkHBar('ch_phases', S.phases.labels, [
+    { label: 'PPJ', data: S.phases.ppj },
+  ], { scales: { x: { beginAtZero: true, suggestedMax: 3 } } });
+
+  mkHBar('ch_weather', S.weathers.labels, [
+    { label: 'PPJ', data: S.weathers.ppj },
+  ], { scales: { x: { beginAtZero: true, suggestedMax: 3 } } });
+
+  // Elenco
+  mkHBar('ch_players_games', S.players.games_top10.labels, [
+    { label: 'Jogos', data: S.players.games_top10.values },
+  ]);
+
+  mkHBar('ch_players_consec', S.players.consec_top10.labels, [
+    { label: 'Consecutivos', data: S.players.consec_top10.values },
+  ]);
+
+  mkHBar('ch_players_cleans', S.players.cleans_top10.labels, [
+    { label: 'Clean sheets', data: S.players.cleans_top10.values },
+  ]);
+
+  if (S.players.has_player_stats) {
+    mkHBar('ch_players_goals', S.players.scorers_top10.labels, [
+      { label: 'Gols', data: S.players.scorers_top10.values },
+    ]);
+    mkHBar('ch_players_assists', S.players.assists_top10.labels, [
+      { label: 'Assistências', data: S.players.assists_top10.values },
+    ]);
+  } else {
+    // sem stats -> mostra vazio sem quebrar
+    mkHBar('ch_players_goals', ['Sem dados'], [{ label: 'Gols', data: [0] }]);
+    mkHBar('ch_players_assists', ['Sem dados'], [{ label: 'Assistências', data: [0] }]);
+  }
+});
+<?php
+echo '</script>';
 
 render_footer();
