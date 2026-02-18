@@ -4,21 +4,28 @@ declare(strict_types=1);
 require_once __DIR__ . '/../db.php';
 
 $pdo  = db();
-$club = app_club(); // PALMEIRAS
+$PAL  = app_club(); // ex: PALMEIRAS
+$club = $PAL;
 
-/**
- * LOG simples do sistema
- * - Sempre grava em D:\Projetos\palmeiras_manager\logs\app.log
- * - Cria o diretório caso não exista
- */
-function pm_log(string $level, string $message): void {
-  $dir = 'D:\\Projetos\\palmeiras_manager\\logs';
-  if (!is_dir($dir)) {
-    @mkdir($dir, 0777, true);
+/* ================= Helpers (não redeclara h()) ================= */
+if (!function_exists('pm_log')) {
+  function pm_log(string $level, string $message): void {
+    $dir = 'D:\\Projetos\\palmeiras_manager\\logs';
+    if (!is_dir($dir)) @mkdir($dir, 0777, true);
+    $file = rtrim($dir, "\\/") . DIRECTORY_SEPARATOR . 'app.log';
+    $ts = date('Y-m-d H:i:s');
+    @file_put_contents($file, "[$ts] [$level] $message" . PHP_EOL, FILE_APPEND);
   }
-  $file = rtrim($dir, "\\/") . DIRECTORY_SEPARATOR . 'app.log';
-  $ts = date('Y-m-d H:i:s');
-  @file_put_contents($file, "[$ts] [$level] $message" . PHP_EOL, FILE_APPEND);
+}
+
+function postv(string $key, string $default = ''): string {
+  return isset($_POST[$key]) ? (string)$_POST[$key] : $default;
+}
+
+function fval(string $key, string $default = ''): string {
+  // usado no GET para repopular campos quando houver redirect com POST não preservado;
+  // aqui fica como fallback simples (para o caso de você evoluir para manter POST)
+  return postv($key, $default);
 }
 
 function int0(mixed $v): int {
@@ -26,7 +33,6 @@ function int0(mixed $v): int {
   return ($v === '') ? 0 : (int)$v;
 }
 
-/** Aceita nota com vírgula (6,8) e converte para float (6.8) */
 function num0(mixed $v): float {
   $v = trim((string)$v);
   if ($v === '') return 0.0;
@@ -34,19 +40,23 @@ function num0(mixed $v): float {
   return (float)$v;
 }
 
-/** Repopula campos após erro */
-function fval(string $key, array $fallbackRow = []): string {
-  if (isset($_POST[$key])) return trim((string)$_POST[$key]);
-  return isset($fallbackRow[$key]) ? trim((string)$fallbackRow[$key]) : '';
+function pick_existing_cols(PDO $pdo, string $table): array {
+  $info = $pdo->query("PRAGMA table_info($table)")->fetchAll(PDO::FETCH_ASSOC);
+  $cols = [];
+  foreach ($info as $r) $cols[(string)$r['name']] = true;
+  return $cols;
 }
 
-$positions = ['GOL','ZAG','LD','LE','ALD','ALE','VOL','MC','ME','MD','MEI','PD','PE','SA','ATA'];
-$kits      = ['Home','Away','Third','Alternativo 1','Alternativo 2','Alternativo 3'];
-$weathers  = ['Limpo','Parcialmente limpo','Nublado','Chuva','Neve'];
+function select_options(array $items, string $selected): string {
+  $out = '';
+  foreach ($items as $it) {
+    $sel = ((string)$it === $selected) ? ' selected' : '';
+    $out .= '<option value="'.h((string)$it).'"'.$sel.'>'.h((string)$it).'</option>';
+  }
+  return $out;
+}
 
-/**
- * Campeonatos (conforme você definiu)
- */
+/* ================= Listas ================= */
 $competitions = [
   'Paulistão Casas Bahia',
   'Brasileirão Betano',
@@ -59,186 +69,209 @@ $competitions = [
   'Copa do Mundo de Clubes da FIFA',
 ];
 
-/**
- * Temporadas: 2026 a 2040
- */
 $seasons = [];
 for ($y = 2026; $y <= 2040; $y++) $seasons[] = (string)$y;
 
-$err = trim((string)($_GET['err'] ?? ''));
-$msg = trim((string)($_GET['msg'] ?? ''));
+$kits     = ['Home','Away','Third','Alternativo 1','Alternativo 2','Alternativo 3'];
+$weathers = ['Limpo','Parcialmente limpo','Nublado','Chuva','Neve'];
+$positions = ['GOL','ZAG','LD','LE','ALD','ALE','VOL','MC','ME','MD','MEI','PD','PE','SA','ATA'];
 
 $MAX_STARTERS = 11;
 $MAX_BENCH    = 9;
 
-function select_options(array $items, string $selected): string {
-  $out = '';
-  foreach ($items as $it) {
-    $sel = ((string)$it === $selected) ? ' selected' : '';
-    $out .= '<option value="'.h((string)$it).'"'.$sel.'>'.h((string)$it).'</option>';
+$err = trim((string)($_GET['err'] ?? ''));
+$msg = trim((string)($_GET['msg'] ?? ''));
+
+/* ================= Jogadores Palmeiras ================= */
+$players = q($pdo, "
+  SELECT id, name, shirt_number
+  FROM players
+  WHERE is_active = 1
+    AND club_name = ? COLLATE NOCASE
+  ORDER BY name
+", [$club])->fetchAll(PDO::FETCH_ASSOC);
+
+$palPlayers = is_array($players) ? $players : [];
+
+/* ================= Render tabela (layout match.php) ================= */
+function render_table_create(
+  bool $isPal,
+  string $role, // starter | bench
+  int $maxRows,
+  array $positions,
+  array $palPlayers,
+  string $mvpSelected
+): void {
+
+  $label = ($role === 'starter') ? 'Titulares (11)' : 'Reservas (9)';
+
+  echo '<h6 class="mt-3">'.h($label).'</h6>';
+  echo '<table class="table table-dark table-sm">';
+  echo '<thead><tr>
+    <th style="width:70px;">POS</th>
+    <th>Atleta</th>
+    <th style="width:55px;" class="text-center">G</th>
+    <th style="width:55px;" class="text-center">A</th>
+    <th style="width:60px;" class="text-center">GC</th>
+    <th style="width:60px;" class="text-center">CA</th>
+    <th style="width:60px;" class="text-center">CV</th>
+    <th style="width:65px;" class="text-center">Nota</th>
+    <th style="width:60px;" class="text-center">MVP</th>
+  </tr></thead><tbody>';
+
+  for ($i = 0; $i < $maxRows; $i++) {
+
+    if ($isPal) {
+      $pidKey = "pal_pid_{$role}_{$i}";
+      $posKey = "pal_pos_{$role}_{$i}";
+      $gKey   = "pal_g_{$role}_{$i}";
+      $aKey   = "pal_a_{$role}_{$i}";
+      $gcKey  = "pal_og_{$role}_{$i}";
+      $caKey  = "pal_y_{$role}_{$i}";
+      $cvKey  = "pal_r_{$role}_{$i}";
+      $rtKey  = "pal_rating_{$role}_{$i}";
+      $mvpVal = "pal_{$role}_{$i}";
+    } else {
+      $pidKey = "opp_name_{$role}_{$i}";
+      $posKey = "opp_pos_{$role}_{$i}";
+      $gKey   = "opp_g_{$role}_{$i}";
+      $aKey   = "opp_a_{$role}_{$i}";
+      $gcKey  = "opp_og_{$role}_{$i}";
+      $caKey  = "opp_y_{$role}_{$i}";
+      $cvKey  = "opp_r_{$role}_{$i}";
+      $rtKey  = "opp_rating_{$role}_{$i}";
+      $mvpVal = "opp_{$role}_{$i}";
+    }
+
+    $checkedMvp = ($mvpSelected !== '' && $mvpSelected === $mvpVal) ? 'checked' : '';
+
+    echo '<tr>';
+
+    // POS dropdown (como você pediu)
+    echo '<td>
+      <select class="form-select form-select-sm text-center px-1" style="max-width:70px;" name="'.h($posKey).'">
+        <option value=""></option>'.select_options($positions, postv($posKey)).'
+      </select>
+    </td>';
+
+    // Atleta
+    echo '<td>';
+    if ($isPal) {
+      echo '<select class="form-select form-select-sm w-100" name="'.h($pidKey).'">';
+      echo '<option value="0">--</option>';
+      $cur = (int)postv($pidKey, '0');
+      foreach ($palPlayers as $p) {
+        $labelP = (string)$p['name'];
+        if (!empty($p['shirt_number'])) $labelP = $p['shirt_number'].' - '.$labelP;
+        $sel = ((int)$p['id'] === $cur) ? 'selected' : '';
+        echo '<option value="'.(int)$p['id'].'" '.$sel.'>'.h($labelP).'</option>';
+      }
+      echo '</select>';
+    } else {
+      echo '<input class="form-control form-control-sm" name="'.h($pidKey).'" value="'.h(postv($pidKey)).'" placeholder="Nome do atleta">';
+    }
+    echo '</td>';
+
+    $small = 'class="form-control form-control-sm text-center px-1" style="max-width:60px;"';
+
+    echo '<td><input type="number" name="'.h($gKey).'"  value="'.h(postv($gKey, '0')).'"  '.$small.'></td>';
+    echo '<td><input type="number" name="'.h($aKey).'"  value="'.h(postv($aKey, '0')).'"  '.$small.'></td>';
+    echo '<td><input type="number" name="'.h($gcKey).'" value="'.h(postv($gcKey,'0')).'" '.$small.'></td>';
+    echo '<td><input type="number" name="'.h($caKey).'" value="'.h(postv($caKey,'0')).'" '.$small.'></td>';
+    echo '<td><input type="number" name="'.h($cvKey).'" value="'.h(postv($cvKey,'0')).'" '.$small.'></td>';
+
+    echo '<td>
+      <input type="number" step="0.1" min="0" max="10"
+        name="'.h($rtKey).'"
+        value="'.h(postv($rtKey)).'"
+        class="form-control form-control-sm text-center px-1"
+        style="max-width:65px;">
+    </td>';
+
+    echo '<td class="text-center">
+      <input type="checkbox" class="mvp-checkbox" name="mvp_row" value="'.h($mvpVal).'" '.$checkedMvp.'>
+    </td>';
+
+    echo '</tr>';
   }
-  return $out;
+
+  echo '</tbody></table>';
 }
 
-function row_player_pal(int $i, string $role, array $positions, array $palPlayers): void {
-  $pidKey    = "pal_pid_{$role}_{$i}";
-  $posKey    = "pal_pos_{$role}_{$i}";
-  $ratingKey = "pal_rating_{$role}_{$i}";
-  $gKey      = "pal_g_{$role}_{$i}";
-  $aKey      = "pal_a_{$role}_{$i}";
-  $ogKey     = "pal_og_{$role}_{$i}";
-  $yKey      = "pal_y_{$role}_{$i}";
-  $rKey      = "pal_r_{$role}_{$i}";
-
-  echo '<tr>';
-
-  echo '<td>';
-  echo '<select class="form-select" name="'.h($pidKey).'">';
-  echo '<option value="">-- atleta --</option>';
-  foreach ($palPlayers as $p) {
-    $label = $p['name'];
-    if (!empty($p['shirt_number'])) $label = $p['shirt_number'].' - '.$label;
-    $sel = (fval($pidKey) === (string)$p['id']) ? ' selected' : '';
-    echo '<option value="'.h((string)$p['id']).'"'.$sel.'>'.h($label).'</option>';
-  }
-  echo '</select>';
-  echo '</td>';
-
-  echo '<td><select class="form-select" name="'.h($posKey).'"><option value="">POS</option>'.select_options($positions, fval($posKey)).'</select></td>';
-  echo '<td><input class="form-control" name="'.h($ratingKey).'" value="'.h(fval($ratingKey)).'" placeholder="0,0"></td>';
-  echo '<td><input class="form-control" name="'.h($gKey).'" value="'.h(fval($gKey)).'" placeholder="0"></td>';
-  echo '<td><input class="form-control" name="'.h($aKey).'" value="'.h(fval($aKey)).'" placeholder="0"></td>';
-  echo '<td><input class="form-control" name="'.h($ogKey).'" value="'.h(fval($ogKey)).'" placeholder="0"></td>';
-  echo '<td><input class="form-control" name="'.h($yKey).'" value="'.h(fval($yKey)).'" placeholder="0"></td>';
-  echo '<td><input class="form-control" name="'.h($rKey).'" value="'.h(fval($rKey)).'" placeholder="0"></td>';
-
-  echo '</tr>';
-}
-
-function row_player_opp(int $i, string $role, array $positions): void {
-  $nameKey   = "opp_name_{$role}_{$i}";
-  $posKey    = "opp_pos_{$role}_{$i}";
-  $ratingKey = "opp_rating_{$role}_{$i}";
-  $gKey      = "opp_g_{$role}_{$i}";
-  $aKey      = "opp_a_{$role}_{$i}";
-  $ogKey     = "opp_og_{$role}_{$i}";
-  $yKey      = "opp_y_{$role}_{$i}";
-  $rKey      = "opp_r_{$role}_{$i}";
-
-  echo '<tr>';
-
-  echo '<td><input class="form-control" name="'.h($nameKey).'" value="'.h(fval($nameKey)).'" placeholder="Nome do atleta"></td>';
-  echo '<td><select class="form-select" name="'.h($posKey).'"><option value="">POS</option>'.select_options($positions, fval($posKey)).'</select></td>';
-  echo '<td><input class="form-control" name="'.h($ratingKey).'" value="'.h(fval($ratingKey)).'" placeholder="0,0"></td>';
-  echo '<td><input class="form-control" name="'.h($gKey).'" value="'.h(fval($gKey)).'" placeholder="0"></td>';
-  echo '<td><input class="form-control" name="'.h($aKey).'" value="'.h(fval($aKey)).'" placeholder="0"></td>';
-  echo '<td><input class="form-control" name="'.h($ogKey).'" value="'.h(fval($ogKey)).'" placeholder="0"></td>';
-  echo '<td><input class="form-control" name="'.h($yKey).'" value="'.h(fval($yKey)).'" placeholder="0"></td>';
-  echo '<td><input class="form-control" name="'.h($rKey).'" value="'.h(fval($rKey)).'" placeholder="0"></td>';
-
-  echo '</tr>';
-}
-
-/* ==========================================================
-   POST handler
-========================================================== */
+/* ================= POST (Salvar) ================= */
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 
-  $season      = trim((string)($_POST['season'] ?? ''));
-  $competition = strtoupper(trim((string)($_POST['competition'] ?? '')));
-  $date        = trim((string)($_POST['match_date'] ?? ''));
-  $match_time  = trim((string)($_POST['match_time'] ?? ''));
-  $phase       = strtoupper(trim((string)($_POST['phase'] ?? '')));
-  $round       = trim((string)($_POST['round'] ?? ''));
-  $stadium     = strtoupper(trim((string)($_POST['stadium'] ?? '')));
-  $referee     = strtoupper(trim((string)($_POST['referee'] ?? '')));
-  $kit_used    = trim((string)($_POST['kit_used'] ?? ''));
-  $weather     = strtoupper(trim((string)($_POST['weather'] ?? '')));
-  $home        = strtoupper(trim((string)($_POST['home'] ?? '')));
-  $away        = strtoupper(trim((string)($_POST['away'] ?? '')));
+  // Campos (mantidos)
+  $season      = trim(postv('season'));
+  $competition = trim(postv('competition'));
+  $date        = trim(postv('match_date'));  // usa $date para manter padrão do seu arquivo
+  $match_time  = trim(postv('match_time'));
+  $phase       = trim(postv('phase'));
+  $round       = trim(postv('round'));
+  $stadium     = trim(postv('stadium'));
+  $referee     = trim(postv('referee'));
+  $kit_used    = trim(postv('kit_used'));
+  $weather     = trim(postv('weather'));
+  $home        = strtoupper(trim(postv('home')));
+  $away        = strtoupper(trim(postv('away')));
 
-  // Placar (opcional)
-  $hsRaw = trim((string)($_POST['home_score'] ?? ''));
-  $asRaw = trim((string)($_POST['away_score'] ?? ''));
-  $home_score = ($hsRaw === '') ? null : (int)$hsRaw;
-  $away_score = ($asRaw === '') ? null : (int)$asRaw;
+  $home_score_raw = trim(postv('home_score'));
+  $away_score_raw = trim(postv('away_score'));
+  $home_score = ($home_score_raw === '') ? null : (int)$home_score_raw;
+  $away_score = ($away_score_raw === '') ? null : (int)$away_score_raw;
+
+  // MVP (seleção única)
+  $mvpRaw = $_POST['mvp_row'] ?? '';
+  if (is_array($mvpRaw)) $mvpRaw = $mvpRaw[0] ?? '';
+  $mvpRow = (string)$mvpRaw;
 
   $isHomePal = (strcasecmp($home, $club) === 0);
   $isAwayPal = (strcasecmp($away, $club) === 0);
 
-  if (!$isHomePal && !$isAwayPal) {
-    redirect('?page=create_match&err=palmeiras_only');
-  }
-
-  // valida obrigatórios
+  if (!$isHomePal && !$isAwayPal) redirect('?page=create_match&err=palmeiras_only');
   if ($season === '' || $competition === '' || $date === '' || $home === '' || $away === '' || strcasecmp($home, $away) === 0) {
     redirect('?page=create_match&err=invalid');
   }
-  if ($kit_used === '' || $weather === '') {
-    redirect('?page=create_match&err=invalid');
-  }
-
-  // garante que temporada está no range 2026..2040 (defesa extra)
-  $sInt = (int)$season;
-  if ($sInt < 2026 || $sInt > 2040) {
-    redirect('?page=create_match&err=invalid');
-  }
+  if ($kit_used === '' || $weather === '') redirect('?page=create_match&err=invalid');
 
   // valida ano da data vs temporada
-  $year = substr($date, 0, 4);
-  if ($year !== $season) {
-    redirect('?page=create_match&err=season_mismatch');
-  }
+  if (substr($date, 0, 4) !== $season) redirect('?page=create_match&err=season_mismatch');
 
-  // adversário inferido automaticamente
   $oppClub = $isHomePal ? $away : $home;
 
   // precisa ter pelo menos 1 do Palmeiras e 1 do adversário
   $hasPal = false;
   $hasOpp = false;
 
-  for ($i=0; $i<$MAX_STARTERS; $i++) if (trim((string)($_POST["pal_pid_starter_$i"] ?? '')) !== '') $hasPal = true;
-  for ($i=0; $i<$MAX_BENCH; $i++)    if (trim((string)($_POST["pal_pid_bench_$i"] ?? '')) !== '') $hasPal = true;
+  for ($i=0; $i<$MAX_STARTERS; $i++) if ((int)($_POST["pal_pid_starter_$i"] ?? 0) > 0) $hasPal = true;
+  for ($i=0; $i<$MAX_BENCH; $i++)    if ((int)($_POST["pal_pid_bench_$i"] ?? 0) > 0) $hasPal = true;
 
   for ($i=0; $i<$MAX_STARTERS; $i++) if (trim((string)($_POST["opp_name_starter_$i"] ?? '')) !== '') $hasOpp = true;
   for ($i=0; $i<$MAX_BENCH; $i++)    if (trim((string)($_POST["opp_name_bench_$i"] ?? '')) !== '') $hasOpp = true;
 
-  if (!$hasPal || !$hasOpp) {
-    redirect('?page=create_match&err=roster_required');
-  }
+  if (!$hasPal || !$hasOpp) redirect('?page=create_match&err=roster_required');
 
   // NÃO permitir mesmo jogador do Palmeiras duplicado
   $palSeen = [];
-
   for ($i=0; $i<$MAX_STARTERS; $i++) {
     $pid = (int)($_POST["pal_pid_starter_$i"] ?? 0);
     if ($pid <= 0) continue;
-    if (isset($palSeen[$pid])) {
-      pm_log('WARN', "Jogador duplicado no Palmeiras (titular). player_id=$pid");
-      redirect('?page=create_match&err=dup_player');
-    }
+    if (isset($palSeen[$pid])) redirect('?page=create_match&err=dup_player');
     $palSeen[$pid] = true;
   }
-
   for ($i=0; $i<$MAX_BENCH; $i++) {
     $pid = (int)($_POST["pal_pid_bench_$i"] ?? 0);
     if ($pid <= 0) continue;
-    if (isset($palSeen[$pid])) {
-      pm_log('WARN', "Jogador duplicado no Palmeiras (reserva). player_id=$pid");
-      redirect('?page=create_match&err=dup_player');
-    }
+    if (isset($palSeen[$pid])) redirect('?page=create_match&err=dup_player');
     $palSeen[$pid] = true;
   }
 
-  // Detecta colunas do match_players (para montar INSERT correto)
-  $mpCols = [];
-  $stCols = $pdo->query("PRAGMA table_info(match_players)");
-  foreach ($stCols->fetchAll(PDO::FETCH_ASSOC) as $r) $mpCols[(string)$r['name']] = true;
-
+  // Detecta schema
+  $mpCols = pick_existing_cols($pdo, 'match_players');
   $mpHasOppId = isset($mpCols['opponent_player_id']);
   $mpHasType  = isset($mpCols['player_type']);
 
-  // Garante tabela de stats do adversário (Caminho B)
+  // Garante tabela stats adversário
   $pdo->exec("
     CREATE TABLE IF NOT EXISTS opponent_match_player_stats (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -259,27 +292,62 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_omps_match ON opponent_match_player_stats(match_id)");
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_omps_player ON opponent_match_player_stats(opponent_player_id)");
 
-  $pdo->beginTransaction();
   try {
-    q($pdo, "INSERT INTO matches(
-      season, competition, phase, round,
-      match_date, match_time,
-      stadium, referee,
-      home, away,
-      kit_used, weather,
-      home_score, away_score
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
-      $season, $competition, $phase, $round,
-      $date, $match_time,
-      $stadium, $referee,
-      $home, $away,
-      $kit_used, $weather,
-      $home_score, $away_score
-    ]);
+    $pdo->beginTransaction();
+
+    /* ---------- INSERT matches (dinâmico, sem created_at/updated_at obrigatórios) ---------- */
+    $matchesCols = pick_existing_cols($pdo, 'matches');
+
+    // Mapeia campos possíveis
+    $data = [];
+
+    if (isset($matchesCols['season']))      $data['season'] = $season;
+    if (isset($matchesCols['competition'])) $data['competition'] = $competition;
+    if (isset($matchesCols['phase']))       $data['phase'] = $phase;
+    if (isset($matchesCols['round']))       $data['round'] = $round;
+
+    if (isset($matchesCols['match_date']))  $data['match_date'] = $date;
+    if (isset($matchesCols['match_time']))  $data['match_time'] = $match_time;
+
+    if (isset($matchesCols['stadium']))     $data['stadium'] = $stadium;
+    if (isset($matchesCols['referee']))     $data['referee'] = $referee;
+
+    if (isset($matchesCols['home']))        $data['home'] = $home;
+    if (isset($matchesCols['away']))        $data['away'] = $away;
+
+    if (isset($matchesCols['kit_used']))    $data['kit_used'] = $kit_used;
+    if (isset($matchesCols['weather']))     $data['weather']  = $weather;
+
+    // placar: home_score/away_score OU home_goals/away_goals
+    if (isset($matchesCols['home_score']))      $data['home_score'] = $home_score;
+    elseif (isset($matchesCols['home_goals']))  $data['home_goals'] = $home_score;
+
+    if (isset($matchesCols['away_score']))      $data['away_score'] = $away_score;
+    elseif (isset($matchesCols['away_goals']))  $data['away_goals'] = $away_score;
+
+    // created_at/updated_at só se existirem
+    $now = date('Y-m-d H:i:s');
+    if (isset($matchesCols['created_at'])) $data['created_at'] = $now;
+    if (isset($matchesCols['updated_at'])) $data['updated_at'] = $now;
+
+    // segurança: precisa ter ao menos os essenciais
+    foreach (['season','competition'] as $req) {
+      if (!isset($data[$req])) {
+        throw new RuntimeException("Schema de matches não contém coluna obrigatória: {$req}");
+      }
+    }
+
+    $cols = array_keys($data);
+    $ph   = array_fill(0, count($cols), '?');
+    $vals = array_values($data);
+
+    $sqlMatch = "INSERT INTO matches (".implode(',', $cols).") VALUES (".implode(',', $ph).")";
+    $stmtMatch = $pdo->prepare($sqlMatch);
+    $stmtMatch->execute($vals);
 
     $matchId = (int)$pdo->lastInsertId();
 
-    // match_players: monta conforme schema real
+    /* ---------- match_players ---------- */
     if ($mpHasOppId && $mpHasType) {
       $insMatchPlayer = $pdo->prepare("
         INSERT INTO match_players(match_id, club_name, player_id, opponent_player_id, role, position, sort_order, entered, player_type)
@@ -297,65 +365,81 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
       ");
     }
 
-    // stats do Palmeiras (tabela existente)
+    /* ---------- stats ---------- */
     $insStatsPal = $pdo->prepare("
       INSERT INTO match_player_stats(match_id, club_name, player_id, goals_for, goals_against, assists, yellow_cards, red_cards, rating, motm)
       VALUES (?,?,?,?,?,?,?,?,?,?)
     ");
 
-    // stats do adversário (tabela nova)
     $insStatsOpp = $pdo->prepare("
       INSERT INTO opponent_match_player_stats(match_id, club_name, opponent_player_id, goals_for, goals_against, assists, yellow_cards, red_cards, rating, motm)
       VALUES (?,?,?,?,?,?,?,?,?,?)
     ");
 
-    // Palmeiras
-    $savePal = function(string $role, int $max) use ($club, $matchId, $insMatchPlayer, $insStatsPal, $positions, $mpHasOppId, $mpHasType): void {
+    /* ---------- opponent_players (dinâmico) ---------- */
+    $oppCols = pick_existing_cols($pdo, 'opponent_players');
+
+    $findOppPlayer = $pdo->prepare("SELECT id FROM opponent_players WHERE club_name = ? AND name = ? LIMIT 1");
+
+    // monta INSERT dinâmico conforme schema real
+    $baseOppCols = ['club_name', 'name'];
+    if (isset($oppCols['primary_position'])) $baseOppCols[] = 'primary_position';
+    if (isset($oppCols['is_active']))        $baseOppCols[] = 'is_active';
+    if (isset($oppCols['created_at']))       $baseOppCols[] = 'created_at';
+    if (isset($oppCols['updated_at']))       $baseOppCols[] = 'updated_at';
+
+    $insOppSql = "INSERT INTO opponent_players (".implode(',', $baseOppCols).") VALUES (".implode(',', array_fill(0, count($baseOppCols), '?')).")";
+    $insOppPlayer = $pdo->prepare($insOppSql);
+
+    /* ---------- Save Palmeiras ---------- */
+    $savePal = function(string $role, int $max) use ($club, $matchId, $insMatchPlayer, $insStatsPal, $mpHasOppId, $mpHasType, $mvpRow): void {
+      $dbRole  = ($role === 'starter') ? 'STARTER' : 'BENCH';
+      $entered = ($role === 'starter') ? 1 : 0;
+
       for ($i=0; $i<$max; $i++) {
         $pid = (int)($_POST["pal_pid_{$role}_{$i}"] ?? 0);
         if ($pid <= 0) continue;
 
         $pos = trim((string)($_POST["pal_pos_{$role}_{$i}"] ?? ''));
-        if ($pos !== '' && !in_array($pos, $positions, true)) $pos = '';
 
         $rating = num0($_POST["pal_rating_{$role}_{$i}"] ?? '');
-        $g  = int0($_POST["pal_g_{$role}_{$i}"] ?? '');
-        $a  = int0($_POST["pal_a_{$role}_{$i}"] ?? '');
-        $og = int0($_POST["pal_og_{$role}_{$i}"] ?? '');
-        $y  = int0($_POST["pal_y_{$role}_{$i}"] ?? '');
-        $r  = int0($_POST["pal_r_{$role}_{$i}"] ?? '');
+        $g  = int0($_POST["pal_g_{$role}_{$i}"] ?? 0);
+        $a  = int0($_POST["pal_a_{$role}_{$i}"] ?? 0);
+        $gc = int0($_POST["pal_og_{$role}_{$i}"] ?? 0);
+        $ca = int0($_POST["pal_y_{$role}_{$i}"] ?? 0);
+        $cv = int0($_POST["pal_r_{$role}_{$i}"] ?? 0);
 
-        $entered = ($role === 'starter') ? 1 : 0;
-        $dbRole  = ($role === 'starter') ? 'STARTER' : 'BENCH';
+        $sortOrder = $i + 1;
 
-        // match_players: Palmeiras sempre em player_id
         if ($mpHasOppId && $mpHasType) {
-          $insMatchPlayer->execute([$matchId, $club, $pid, null, $dbRole, $pos, $i+1, $entered, 'HOME']);
+          $insMatchPlayer->execute([$matchId, $club, $pid, null, $dbRole, $pos, $sortOrder, $entered, 'HOME']);
         } elseif ($mpHasOppId) {
-          $insMatchPlayer->execute([$matchId, $club, $pid, null, $dbRole, $pos, $i+1, $entered]);
+          $insMatchPlayer->execute([$matchId, $club, $pid, null, $dbRole, $pos, $sortOrder, $entered]);
         } else {
-          $insMatchPlayer->execute([$matchId, $club, $pid, $dbRole, $pos, $i+1, $entered]);
+          $insMatchPlayer->execute([$matchId, $club, $pid, $dbRole, $pos, $sortOrder, $entered]);
         }
 
-        // stats Palmeiras
-        $insStatsPal->execute([$matchId, $club, $pid, $g, $og, $a, $y, $r, $rating, 0]);
+        $rowId = "pal_{$role}_{$i}";
+        $isMvp = ($mvpRow !== '' && $mvpRow === $rowId) ? 1 : 0;
+
+        $insStatsPal->execute([$matchId, $club, $pid, $g, $gc, $a, $ca, $cv, $rating, $isMvp]);
       }
     };
 
-    // Adversário (cria em opponent_players se não existir) - SEM secondary_positions
-    $findOppPlayer = $pdo->prepare("SELECT id FROM opponent_players WHERE club_name = ? AND name = ? LIMIT 1");
-    $insOppPlayer  = $pdo->prepare("
-      INSERT INTO opponent_players (club_name, name, primary_position, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, 1, datetime('now'), datetime('now'))
-    ");
+    /* ---------- Save Opponent ---------- */
+    $saveOpp = function(string $role, int $max) use (
+      $oppClub, $matchId, $insMatchPlayer, $insStatsOpp,
+      $mpHasOppId, $mpHasType, $mvpRow,
+      $findOppPlayer, $insOppPlayer, $baseOppCols
+    ): void {
+      $dbRole  = ($role === 'starter') ? 'STARTER' : 'BENCH';
+      $entered = ($role === 'starter') ? 1 : 0;
 
-    $saveOpp = function(string $role, int $max) use ($oppClub, $matchId, $insMatchPlayer, $insStatsOpp, $positions, $findOppPlayer, $insOppPlayer, $pdo, $mpHasOppId, $mpHasType): void {
       for ($i=0; $i<$max; $i++) {
         $name = trim((string)($_POST["opp_name_{$role}_{$i}"] ?? ''));
         if ($name === '') continue;
 
         $pos = trim((string)($_POST["opp_pos_{$role}_{$i}"] ?? ''));
-        if ($pos !== '' && !in_array($pos, $positions, true)) $pos = '';
 
         $findOppPlayer->execute([$oppClub, $name]);
         $row = $findOppPlayer->fetch(PDO::FETCH_ASSOC);
@@ -363,32 +447,42 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         if ($row && isset($row['id'])) {
           $oppPid = (int)$row['id'];
         } else {
-          $insOppPlayer->execute([$oppClub, $name, $pos]);
-          $oppPid = (int)$pdo->lastInsertId();
+          $now = date('Y-m-d H:i:s');
+          $vals = [];
+          foreach ($baseOppCols as $c) {
+            if ($c === 'club_name') $vals[] = $oppClub;
+            elseif ($c === 'name') $vals[] = $name;
+            elseif ($c === 'primary_position') $vals[] = $pos;
+            elseif ($c === 'is_active') $vals[] = 1;
+            elseif ($c === 'created_at') $vals[] = $now;
+            elseif ($c === 'updated_at') $vals[] = $now;
+            else $vals[] = null;
+          }
+          $insOppPlayer->execute($vals);
+          $oppPid = (int)$GLOBALS['pdo']->lastInsertId();
         }
 
         $rating = num0($_POST["opp_rating_{$role}_{$i}"] ?? '');
-        $g  = int0($_POST["opp_g_{$role}_{$i}"] ?? '');
-        $a  = int0($_POST["opp_a_{$role}_{$i}"] ?? '');
-        $og = int0($_POST["opp_og_{$role}_{$i}"] ?? '');
-        $y  = int0($_POST["opp_y_{$role}_{$i}"] ?? '');
-        $r  = int0($_POST["opp_r_{$role}_{$i}"] ?? '');
+        $g  = int0($_POST["opp_g_{$role}_{$i}"] ?? 0);
+        $a  = int0($_POST["opp_a_{$role}_{$i}"] ?? 0);
+        $gc = int0($_POST["opp_og_{$role}_{$i}"] ?? 0);
+        $ca = int0($_POST["opp_y_{$role}_{$i}"] ?? 0);
+        $cv = int0($_POST["opp_r_{$role}_{$i}"] ?? 0);
 
-        $entered = ($role === 'starter') ? 1 : 0;
-        $dbRole  = ($role === 'starter') ? 'STARTER' : 'BENCH';
+        $sortOrder = $i + 1;
 
-        // match_players: adversário sempre em opponent_player_id
         if ($mpHasOppId && $mpHasType) {
-          $insMatchPlayer->execute([$matchId, $oppClub, null, $oppPid, $dbRole, $pos, $i+1, $entered, 'AWAY']);
+          $insMatchPlayer->execute([$matchId, $oppClub, null, $oppPid, $dbRole, $pos, $sortOrder, $entered, 'AWAY']);
         } elseif ($mpHasOppId) {
-          $insMatchPlayer->execute([$matchId, $oppClub, null, $oppPid, $dbRole, $pos, $i+1, $entered]);
+          $insMatchPlayer->execute([$matchId, $oppClub, null, $oppPid, $dbRole, $pos, $sortOrder, $entered]);
         } else {
-          // fallback (não esperado no seu schema atual)
-          $insMatchPlayer->execute([$matchId, $oppClub, $oppPid, $dbRole, $pos, $i+1, $entered]);
+          $insMatchPlayer->execute([$matchId, $oppClub, $oppPid, $dbRole, $pos, $sortOrder, $entered]);
         }
 
-        // stats adversário -> tabela nova
-        $insStatsOpp->execute([$matchId, $oppClub, $oppPid, $g, $og, $a, $y, $r, $rating, 0]);
+        $rowId = "opp_{$role}_{$i}";
+        $isMvp = ($mvpRow !== '' && $mvpRow === $rowId) ? 1 : 0;
+
+        $insStatsOpp->execute([$matchId, $oppClub, $oppPid, $g, $gc, $a, $ca, $cv, $rating, $isMvp]);
       }
     };
 
@@ -399,31 +493,20 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 
     $pdo->commit();
 
-    pm_log('INFO', "Partida cadastrada com sucesso. match_id=$matchId home=$home away=$away date=$date season=$season competition=$competition oppClub=$oppClub");
-    redirect('?page=matches&msg=saved');
+    pm_log('INFO', "create_match OK match_id={$matchId} home={$home} away={$away} oppClub={$oppClub}");
+    redirect('/?page=match&id=' . $matchId);
 
   } catch (Throwable $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
-    pm_log('ERROR', 'Erro ao cadastrar partida: ' . $e->getMessage());
+    pm_log('ERROR', 'create_match FAIL: '.$e->getMessage());
     redirect('?page=create_match&err=exception');
   }
 }
 
-/* ==========================================================
-   GET (render)
-========================================================== */
-
-$players = q($pdo, "
-  SELECT id, name, shirt_number
-  FROM players
-  WHERE is_active = 1
-    AND club_name = ? COLLATE NOCASE
-  ORDER BY name
-", [$club])->fetchAll();
-
+/* ================= UI ================= */
 render_header('Cadastrar partida');
 
-// Descobrir o nome do adversário (para título da coluna direita)
+// Descobrir título do adversário
 $homeName = fval('home');
 $awayName = fval('away');
 $oppTitle = 'Adversário';
@@ -432,273 +515,162 @@ if ($homeName !== '' && $awayName !== '') {
   elseif (strcasecmp($awayName, $club) === 0) $oppTitle = $homeName;
 }
 
-// Alerts
+// alerts
 if ($err === 'invalid') {
   echo '<div class="alert alert-warning card-soft">Preencha os campos obrigatórios e confira os dados.</div>';
 } elseif ($err === 'season_mismatch') {
   echo '<div class="alert alert-warning card-soft">A DATA deve estar no mesmo ano da TEMPORADA.</div>';
 } elseif ($err === 'palmeiras_only') {
-  echo '<div class="alert alert-warning card-soft">Este sistema aceita apenas jogos onde o ' . h($club) . ' participa.</div>';
+  echo '<div class="alert alert-warning card-soft">Este sistema aceita apenas jogos onde o '.h($club).' participa.</div>';
 } elseif ($err === 'roster_required') {
-  echo '<div class="alert alert-warning card-soft">Informe ao menos 1 atleta no Palmeiras e 1 no adversário (titular ou reserva).</div>';
+  echo '<div class="alert alert-warning card-soft">Informe ao menos 1 atleta do Palmeiras e 1 do adversário.</div>';
 } elseif ($err === 'dup_player') {
-  echo '<div class="alert alert-warning card-soft">Você selecionou o <b>mesmo jogador do Palmeiras</b> em mais de uma posição. Ajuste a escalação e tente novamente.</div>';
+  echo '<div class="alert alert-warning card-soft">Você selecionou o <b>mesmo jogador do Palmeiras</b> mais de uma vez.</div>';
 } elseif ($err === 'exception') {
-  echo '<div class="alert alert-danger card-soft">Falha ao cadastrar a partida. Verifique o log em <code>D:\Projetos\palmeiras_manager\logs\app.log</code>.</div>';
+  echo '<div class="alert alert-danger card-soft">Falha ao cadastrar. Verifique o log em <code>D:\\Projetos\\palmeiras_manager\\logs\\app.log</code>.</div>';
 } elseif ($msg === 'saved') {
   echo '<div class="alert alert-success card-soft">Partida cadastrada com sucesso.</div>';
 }
 
-// CSS original (mantém layout/tamanho conforme seu antigo)
-echo <<<HTML
-<style>
-/* ===== Create Match: alinhamento + responsivo ===== */
-.pm-roster-table { width: 100%; table-layout: fixed; }
-.pm-roster-table th, .pm-roster-table td { vertical-align: middle; }
-.pm-roster-table col.pm-col-pos  { width: clamp(74px, 5.5vw, 92px); }
-.pm-roster-table col.pm-col-nota { width: clamp(86px, 6.5vw, 120px); }
-.pm-roster-table col.pm-col-mini { width: clamp(56px, 4.2vw, 76px); }
-.pm-roster-table th { padding: .55rem .65rem; }
-.pm-roster-table td { padding: .45rem .55rem; }
-.pm-roster-table th, .pm-roster-table td { white-space: nowrap; }
-.pm-roster-table select, .pm-roster-table input{
-  width: 100%;
-  height: 40px;
-  border-radius: 14px;
-  padding: 0 12px;
-}
-.pm-roster-table td:first-child select,
-.pm-roster-table td:first-child input{
-  padding-left: 14px;
-  padding-right: 34px;
-}
-.pm-roster-table td:nth-child(n+3) input{
-  text-align: center;
-  padding: 0 8px;
-}
-.pm-roster-table thead th{ position: sticky; top: 0; z-index: 1; }
-
-/* Em telas grandes, evita esmagar as colunas e mantém scroll interno */
-@media (min-width: 1200px){
-  .pm-roster-table { min-width: 860px; }
-}
-@media (max-width: 900px){
-  .table-responsive{ overflow-x:auto; }
-  .pm-roster-table{ min-width: 980px; }
-}
-</style>
-HTML;
-
-$palPlayers = is_array($players) ? $players : [];
-
-echo '<div class="row g-4">';
-echo '<div class="col-12">';
-echo '<div class="card card-soft p-3">';
+echo '<style>
+table td, table th { vertical-align: middle; }
+table input[type="number"] { text-align: center; }
+</style>';
 
 echo '<form method="post" autocomplete="off">';
 
+echo '<div class="row g-4">';
+
+echo '<div class="col-12"><div class="card-soft p-3">';
 echo '<h5 class="mb-3">Dados do jogo</h5>';
 
 echo '<div class="row g-3">';
 
-echo '<div class="col-12 col-md-2">';
-echo '<label class="form-label">Temporada</label>';
-echo '<select class="form-select" name="season" required>';
-echo '<option value="">-- selecione --</option>';
-echo select_options($seasons, fval('season'));
-echo '</select>';
-echo '</div>';
+echo '<div class="col-12 col-md-2">
+  <label class="form-label">Temporada</label>
+  <select class="form-select" name="season" required>
+    <option value="">-- selecione --</option>'.select_options($seasons, fval('season')).'
+  </select>
+</div>';
 
-echo '<div class="col-12 col-md-4">';
-echo '<label class="form-label">Campeonato</label>';
-echo '<select class="form-select" name="competition" required>';
-echo '<option value="">-- selecione --</option>';
-echo select_options($competitions, fval('competition'));
-echo '</select>';
-echo '</div>';
+echo '<div class="col-12 col-md-4">
+  <label class="form-label">Campeonato</label>
+  <select class="form-select" name="competition" required>
+    <option value="">-- selecione --</option>'.select_options($competitions, fval('competition')).'
+  </select>
+</div>';
 
-echo '<div class="col-12 col-md-2">';
-echo '<label class="form-label">Data</label>';
-echo '<input class="form-control" type="date" name="match_date" value="'.h(fval('match_date')).'" required>';
-echo '</div>';
+echo '<div class="col-12 col-md-2">
+  <label class="form-label">Data</label>
+  <input class="form-control" type="date" name="match_date" value="'.h(fval('match_date')).'" required>
+</div>';
 
-echo '<div class="col-12 col-md-2">';
-echo '<label class="form-label">Horário</label>';
-echo '<input class="form-control" type="time" name="match_time" value="'.h(fval('match_time')).'">';
-echo '</div>';
+echo '<div class="col-12 col-md-2">
+  <label class="form-label">Horário</label>
+  <input class="form-control" type="time" name="match_time" value="'.h(fval('match_time')).'">
+</div>';
 
-echo '<div class="col-12 col-md-2">';
-echo '<label class="form-label">Fase</label>';
-echo '<input class="form-control" name="phase" value="'.h(fval('phase')).'" placeholder="Ex: Quartas">';
-echo '</div>';
+echo '<div class="col-12 col-md-2">
+  <label class="form-label">Fase</label>
+  <input class="form-control" name="phase" value="'.h(fval('phase')).'">
+</div>';
 
-echo '<div class="col-12 col-md-2">';
-echo '<label class="form-label">Rodada</label>';
-echo '<input class="form-control" name="round" value="'.h(fval('round')).'" placeholder="Ex: 10">';
-echo '</div>';
+echo '<div class="col-12 col-md-2">
+  <label class="form-label">Rodada</label>
+  <input class="form-control" name="round" value="'.h(fval('round')).'">
+</div>';
 
-echo '<div class="col-12 col-md-4">';
-echo '<label class="form-label">Estádio</label>';
-echo '<input class="form-control" name="stadium" value="'.h(fval('stadium')).'">';
-echo '</div>';
+echo '<div class="col-12 col-md-4">
+  <label class="form-label">Estádio</label>
+  <input class="form-control" name="stadium" value="'.h(fval('stadium')).'">
+</div>';
 
-echo '<div class="col-12 col-md-4">';
-echo '<label class="form-label">Árbitro</label>';
-echo '<input class="form-control" name="referee" value="'.h(fval('referee')).'">';
-echo '</div>';
+echo '<div class="col-12 col-md-4">
+  <label class="form-label">Árbitro</label>
+  <input class="form-control" name="referee" value="'.h(fval('referee')).'">
+</div>';
 
-echo '<div class="col-12 col-md-2">';
-echo '<label class="form-label">Uniforme</label>';
-echo '<select class="form-select" name="kit_used" required>';
-echo '<option value="">-- selecione --</option>';
-echo select_options($kits, fval('kit_used'));
-echo '</select>';
-echo '</div>';
+echo '<div class="col-12 col-md-2">
+  <label class="form-label">Uniforme</label>
+  <select class="form-select" name="kit_used" required>
+    <option value="">-- selecione --</option>'.select_options($kits, fval('kit_used')).'
+  </select>
+</div>';
 
-echo '<div class="col-12 col-md-2">';
-echo '<label class="form-label">Clima</label>';
-echo '<select class="form-select" name="weather" required>';
-echo '<option value="">-- selecione --</option>';
-echo select_options($weathers, fval('weather'));
-echo '</select>';
-echo '</div>';
+echo '<div class="col-12 col-md-2">
+  <label class="form-label">Clima</label>
+  <select class="form-select" name="weather" required>
+    <option value="">-- selecione --</option>'.select_options($weathers, fval('weather')).'
+  </select>
+</div>';
 
-echo '<div class="col-12 col-md-4">';
-echo '<label class="form-label">Mandante</label>';
-echo '<input class="form-control" name="home" value="'.h($homeName).'" required>';
-echo '</div>';
+echo '<div class="col-12 col-md-4">
+  <label class="form-label">Mandante</label>
+  <input class="form-control" name="home" value="'.h(fval('home')).'" required>
+</div>';
 
-echo '<div class="col-12 col-md-4">';
-echo '<label class="form-label">Visitante</label>';
-echo '<input class="form-control" name="away" value="'.h($awayName).'" required>';
-echo '</div>';
+echo '<div class="col-12 col-md-4">
+  <label class="form-label">Visitante</label>
+  <input class="form-control" name="away" value="'.h(fval('away')).'" required>
+</div>';
 
-echo '<div class="col-6 col-md-2">';
-echo '<label class="form-label">GF (Mandante)</label>';
-echo '<input class="form-control" name="home_score" value="'.h(fval('home_score')).'" placeholder="0">';
-echo '</div>';
+echo '<div class="col-6 col-md-2">
+  <label class="form-label">GF (Mandante)</label>
+  <input class="form-control" name="home_score" value="'.h(fval('home_score')).'" placeholder="0">
+</div>';
 
-echo '<div class="col-6 col-md-2">';
-echo '<label class="form-label">GA (Visitante)</label>';
-echo '<input class="form-control" name="away_score" value="'.h(fval('away_score')).'" placeholder="0">';
-echo '</div>';
+echo '<div class="col-6 col-md-2">
+  <label class="form-label">GA (Visitante)</label>
+  <input class="form-control" name="away_score" value="'.h(fval('away_score')).'" placeholder="0">
+</div>';
 
 echo '</div>'; // row
+echo '</div></div>'; // card dados
 
-echo '<hr class="my-4">';
+// MVP selecionado (repopulação)
+$mvpSelected = '';
+$mvpRaw = $_POST['mvp_row'] ?? '';
+if (is_array($mvpRaw)) $mvpRaw = $mvpRaw[0] ?? '';
+$mvpSelected = (string)$mvpRaw;
 
-echo '<h5 class="mb-2">Relacionados e desempenho</h5>';
-echo '<div class="text-muted mb-3">Preencha titulares e reservas. No adversário, digite o nome do atleta.</div>';
-
-echo '<div class="row g-3">';
-
-/* =========================
-   ESQUERDA: PALMEIRAS
-========================= */
-echo '<div class="col-12 col-xl-6">';
-echo '<div class="card card-soft p-3 h-100">';
-
-echo '<div class="d-flex align-items-center justify-content-between mb-2">';
-echo '<h6 class="mb-0">'.h($club).'</h6>';
-echo '<span class="badge text-bg-success">Meu time</span>';
-echo '</div>';
-
-echo '<div class="mb-2 fw-bold">Titulares</div>';
-echo '<div class="table-responsive">';
-echo '<table class="table table-sm pm-roster-table align-middle mb-3">';
-echo '<colgroup>
-  <col>
-  <col class="pm-col-pos">
-  <col class="pm-col-nota">
-  <col class="pm-col-mini">
-  <col class="pm-col-mini">
-  <col class="pm-col-mini">
-  <col class="pm-col-mini">
-  <col class="pm-col-mini">
-</colgroup>';
-echo '<thead><tr><th>Atleta</th><th>POS</th><th>Nota</th><th>G</th><th>A</th><th>GC</th><th>CA</th><th>CV</th></tr></thead><tbody>';
-for ($i=0; $i<$MAX_STARTERS; $i++) row_player_pal($i, 'starter', $positions, $palPlayers);
-echo '</tbody></table>';
-echo '</div>';
-
-echo '<div class="mb-2 fw-bold">Reservas (máx. '.$MAX_BENCH.')</div>';
-echo '<div class="table-responsive">';
-echo '<table class="table table-sm pm-roster-table align-middle mb-0">';
-echo '<colgroup>
-  <col>
-  <col class="pm-col-pos">
-  <col class="pm-col-nota">
-  <col class="pm-col-mini">
-  <col class="pm-col-mini">
-  <col class="pm-col-mini">
-  <col class="pm-col-mini">
-  <col class="pm-col-mini">
-</colgroup>';
-echo '<thead><tr><th>Atleta</th><th>POS</th><th>Nota</th><th>G</th><th>A</th><th>GC</th><th>CA</th><th>CV</th></tr></thead><tbody>';
-for ($i=0; $i<$MAX_BENCH; $i++) row_player_pal($i, 'bench', $positions, $palPlayers);
-echo '</tbody></table>';
-echo '</div>';
-
+echo '<div class="col-12 col-xl-6"><div class="card-soft p-3">';
+echo '<h5 class="mb-3">'.h($club).'</h5>';
+render_table_create(true,  'starter', $MAX_STARTERS, $positions, $palPlayers, $mvpSelected);
+render_table_create(true,  'bench',   $MAX_BENCH,    $positions, $palPlayers, $mvpSelected);
 echo '</div></div>';
 
-/* =========================
-   DIREITA: ADVERSÁRIO
-========================= */
-echo '<div class="col-12 col-xl-6">';
-echo '<div class="card card-soft p-3 h-100">';
+echo '<div class="col-12 col-xl-6"><div class="card-soft p-3">';
+echo '<h5 class="mb-3">'.h($oppTitle).'</h5>';
+render_table_create(false, 'starter', $MAX_STARTERS, $positions, $palPlayers, $mvpSelected);
+render_table_create(false, 'bench',   $MAX_BENCH,    $positions, $palPlayers, $mvpSelected);
+echo '</div></div>';
 
-echo '<div class="d-flex align-items-center justify-content-between mb-2">';
-echo '<h6 class="mb-0">'.h($oppTitle).'</h6>';
-echo '<span class="badge text-bg-secondary">Outro time</span>';
-echo '</div>';
+echo '</div>'; // row principal
 
-echo '<div class="mb-2 fw-bold">Titulares</div>';
-echo '<div class="table-responsive">';
-echo '<table class="table table-sm pm-roster-table align-middle mb-3">';
-echo '<colgroup>
-  <col>
-  <col class="pm-col-pos">
-  <col class="pm-col-nota">
-  <col class="pm-col-mini">
-  <col class="pm-col-mini">
-  <col class="pm-col-mini">
-  <col class="pm-col-mini">
-  <col class="pm-col-mini">
-</colgroup>';
-echo '<thead><tr><th>Atleta</th><th>POS</th><th>Nota</th><th>G</th><th>A</th><th>GC</th><th>CA</th><th>CV</th></tr></thead><tbody>';
-for ($i=0; $i<$MAX_STARTERS; $i++) row_player_opp($i, 'starter', $positions);
-echo '</tbody></table>';
-echo '</div>';
-
-echo '<div class="mb-2 fw-bold">Reservas (máx. '.$MAX_BENCH.')</div>';
-echo '<div class="table-responsive">';
-echo '<table class="table table-sm pm-roster-table align-middle mb-0">';
-echo '<colgroup>
-  <col>
-  <col class="pm-col-pos">
-  <col class="pm-col-nota">
-  <col class="pm-col-mini">
-  <col class="pm-col-mini">
-  <col class="pm-col-mini">
-  <col class="pm-col-mini">
-  <col class="pm-col-mini">
-</colgroup>';
-echo '<thead><tr><th>Atleta</th><th>POS</th><th>Nota</th><th>G</th><th>A</th><th>GC</th><th>CA</th><th>CV</th></tr></thead><tbody>';
-for ($i=0; $i<$MAX_BENCH; $i++) row_player_opp($i, 'bench', $positions);
-echo '</tbody></table>';
-echo '</div>';
-
-echo '</div></div>'; // col + card
-
-echo '</div>'; // row lado a lado
-
-echo '<div class="d-flex gap-2 mt-3">';
-echo '<button class="btn btn-success" type="submit">Salvar partida completa</button>';
-echo '<a class="btn btn-outline-secondary" href="?page=matches">Cancelar</a>';
-echo '</div>';
+echo '<div class="text-end mt-3">
+  <button class="btn btn-success">Salvar</button>
+</div>';
 
 echo '</form>';
 
-echo '</div></div></div>';
-
 render_footer();
+
+echo <<<HTML
+<script>
+(function () {
+  const boxes = Array.from(document.querySelectorAll('.mvp-checkbox'));
+  if (!boxes.length) return;
+
+  // garante só 1 marcado
+  const checked = boxes.filter(b => b.checked);
+  if (checked.length > 1) checked.slice(1).forEach(b => b.checked = false);
+
+  boxes.forEach(box => {
+    box.addEventListener('change', function () {
+      if (!this.checked) return; // permite ficar sem MVP
+      boxes.forEach(b => { if (b !== this) b.checked = false; });
+    });
+  });
+})();
+</script>
+HTML;

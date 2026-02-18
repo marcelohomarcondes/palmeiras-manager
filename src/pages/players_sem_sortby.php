@@ -90,59 +90,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 VALUES (?,?,?,?,?,?)",
         [$name, $shirt, $prim, $sec, $active, app_club()]
       );
+
     }
     redirect('/?page=players');
-  }
-}
-
-/**
- * SORT POR COLUNA (seleção em cada coluna)
- * Cada select envia ASC/DESC para sua coluna; só 1 deve ficar ativo por vez.
- * Mantém o estilo atual (apenas adiciona os selects no cabeçalho).
- */
-$allowedDirs = ['ASC', 'DESC'];
-
-$sortKey = null;
-$sortDir = null;
-
-// prioridade fixa (se, por algum motivo, vier mais de um select preenchido)
-$sortSelectMap = [
-  'sort_number'    => 'number',
-  'sort_name'      => 'name',
-  'sort_primary'   => 'primary',
-  'sort_secondary' => 'secondary',
-  'sort_status'    => 'status',
-];
-
-foreach ($sortSelectMap as $param => $key) {
-  if (isset($_GET[$param])) {
-    $v = strtoupper(trim((string)$_GET[$param]));
-    if (in_array($v, $allowedDirs, true)) {
-      $sortKey = $key;
-      $sortDir = $v;
-      break;
-    }
-  }
-}
-
-// ORDER BY padrão atual (quando não há sort selecionado)
-$defaultOrderBy = "is_active DESC, primary_position ASC, shirt_number ASC, name ASC";
-
-// Monta ORDER BY com base no sort selecionado (com tie-breakers estáveis)
-$orderBy = $defaultOrderBy;
-
-if ($sortKey !== null && $sortDir !== null) {
-  if ($sortKey === 'number') {
-    // números nulos sempre no fim, independente do sentido
-    $orderBy = "shirt_number IS NULL ASC, shirt_number {$sortDir}, name ASC";
-  } elseif ($sortKey === 'name') {
-    $orderBy = "name {$sortDir}";
-  } elseif ($sortKey === 'primary') {
-    $orderBy = "primary_position {$sortDir}, name ASC";
-  } elseif ($sortKey === 'secondary') {
-    $orderBy = "secondary_positions {$sortDir}, name ASC";
-  } elseif ($sortKey === 'status') {
-    $orderBy = "is_active {$sortDir}, name ASC";
   }
 }
 
@@ -150,7 +100,7 @@ $rows = q($pdo, "
   SELECT *
   FROM players
   WHERE club_name = ? COLLATE NOCASE
-  ORDER BY {$orderBy}
+  ORDER BY is_active DESC, primary_position ASC, shirt_number ASC, name ASC
 ", [app_club()])->fetchAll();
 
 render_header('Elenco');
@@ -222,49 +172,8 @@ echo '<div class="col-lg-8"><div class="card card-soft p-3">';
 echo '<div class="d-flex justify-content-between align-items-center mb-2"><div class="fw-bold">Lista</div>';
 echo '<div class="text-muted small">Total: ' . count($rows) . '</div></div>';
 
-echo '<div class="table-responsive">';
-
-// Form GET para sort por coluna (sem mudar layout geral)
-echo '<form method="get" id="sortFormPlayers">';
-echo '<input type="hidden" name="page" value="players">';
-if (isset($_GET['edit'])) echo '<input type="hidden" name="edit" value="' . (int)$_GET['edit'] . '">';
-
-echo '<table class="table table-sm align-middle mb-0">';
-
-echo '<thead><tr>';
-
-function sortSelect(string $name, ?string $activeKey, ?string $activeDir, string $thisKey): string {
-  $isActive = ($activeKey === $thisKey) ? ($activeDir ?? '') : '';
-  $selNone = ($isActive === '') ? ' selected' : '';
-  $selAsc  = ($isActive === 'ASC') ? ' selected' : '';
-  $selDesc = ($isActive === 'DESC') ? ' selected' : '';
-  // sem estilos custom; só classes já usadas no projeto (bootstrap)
-  return '<select class="form-select form-select-sm js-sortcol" name="' . h($name) . '" data-key="' . h($thisKey) . '">' .
-           '<option value=""' . $selNone . '>—</option>' .
-           '<option value="ASC"' . $selAsc . '>↑</option>' .
-           '<option value="DESC"' . $selDesc . '>↓</option>' .
-         '</select>';
-}
-
-// th # (numeração)
-echo '<th>#' . sortSelect('sort_number', $sortKey, $sortDir, 'number') . '</th>';
-
-// th Nome
-echo '<th>Atleta' . sortSelect('sort_name', $sortKey, $sortDir, 'name') . '</th>';
-
-// th Posição primária
-echo '<th>Posição' . sortSelect('sort_primary', $sortKey, $sortDir, 'primary') . '</th>';
-
-// th Secundárias
-echo '<th>Pos. Sec.' . sortSelect('sort_secondary', $sortKey, $sortDir, 'secondary') . '</th>';
-
-// th Status
-echo '<th>Status' . sortSelect('sort_status', $sortKey, $sortDir, 'status') . '</th>';
-
-// th ações
-echo '<th></th>';
-
-echo '</tr></thead><tbody>';
+echo '<div class="table-responsive"><table class="table table-sm align-middle mb-0">';
+echo '<thead><tr><th>#</th><th>Atleta</th><th>Posição</th><th>Sec.</th><th>Status</th><th></th></tr></thead><tbody>';
 
 foreach ($rows as $r) {
   echo '<tr>';
@@ -280,32 +189,7 @@ foreach ($rows as $r) {
   echo '</tr>';
 }
 
-echo '</tbody></table>';
-echo '</form>'; // sortFormPlayers
-echo '</div>';  // table-responsive
-
-// JS mínimo: ao selecionar uma coluna, limpa as outras e submete (sem mexer no estilo)
-echo '<script>
-(function () {
-  var form = document.getElementById("sortFormPlayers");
-  if (!form) return;
-
-  var selects = form.querySelectorAll(".js-sortcol");
-  function clearOthers(active) {
-    selects.forEach(function (s) {
-      if (s !== active) s.value = "";
-    });
-  }
-
-  selects.forEach(function (sel) {
-    sel.addEventListener("change", function () {
-      clearOthers(sel);
-      form.submit();
-    });
-  });
-})();
-</script>';
-
+echo '</tbody></table></div>';
 echo '</div></div>';
 echo '</div>';
 

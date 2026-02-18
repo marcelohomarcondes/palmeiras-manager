@@ -14,6 +14,9 @@ $AWAY = (string)$match['away'];
 
 $clubs = [$HOME => true, $AWAY => true];
 
+// Qual é o adversário (o clube que NÃO é o Palmeiras)
+$OPP_CLUB = (strcasecmp($HOME, $PAL) === 0) ? $AWAY : $HOME;
+
 // Lista de atletas do Palmeiras (tabela players)
 $palPlayers = q($pdo, "
   SELECT id, name, shirt_number, is_active
@@ -48,32 +51,18 @@ $mpRows = q($pdo, "
     mp.sort_order
 ", [$id])->fetchAll(PDO::FETCH_ASSOC);
 
-// ===== Stats (Palmeiras x adversário) =====
-// Palmeiras: match_player_stats (player_id)
-$palStatsRows = q($pdo, "
+// Stats (assumindo que match_player_stats tem player_id e opponent_player_id)
+$statsRows = q($pdo, "
   SELECT *
   FROM match_player_stats
   WHERE match_id = ?
 ", [$id])->fetchAll(PDO::FETCH_ASSOC);
 
-// Adversário: opponent_match_player_stats (opponent_player_id)
-$oppStatsRows = q($pdo, "
-  SELECT *
-  FROM opponent_match_player_stats
-  WHERE match_id = ?
-", [$id])->fetchAll(PDO::FETCH_ASSOC);
-
 $statsMap = [];
-foreach ($palStatsRows as $s) {
-  $pid = (int)($s['player_id'] ?? 0);
-  if ($pid <= 0) continue;
-  $key = (string)$s['club_name'] . '#P' . $pid;
-  $statsMap[$key] = $s;
-}
-foreach ($oppStatsRows as $s) {
+foreach ($statsRows as $s) {
+  $pid  = (int)($s['player_id'] ?? 0);
   $opid = (int)($s['opponent_player_id'] ?? 0);
-  if ($opid <= 0) continue;
-  $key = (string)$s['club_name'] . '#O' . $opid;
+  $key = (string)$s['club_name'] . '#' . ($opid > 0 ? ('O'.$opid) : ('P'.$pid));
   $statsMap[$key] = $s;
 }
 
@@ -124,117 +113,80 @@ ensure_placeholders($lineup[$AWAY]);
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $rows = $_POST['rows'] ?? [];
 
-  // Campo único (checkbox + JS) que representa qual linha é o MVP
-  $mvpRowRaw = $_POST['mvp_row'] ?? '';
-  if (is_array($mvpRowRaw)) $mvpRowRaw = $mvpRowRaw[0] ?? '';
-  $mvpRow = (string)$mvpRowRaw;
-
   $pdo->beginTransaction();
 
-  try {
-    // Limpa e regrava o lineup/stats dessa partida
-    q($pdo, "DELETE FROM match_player_stats WHERE match_id = ?", [$id]);
-    q($pdo, "DELETE FROM opponent_match_player_stats WHERE match_id = ?", [$id]);
-    q($pdo, "DELETE FROM match_players WHERE match_id = ?", [$id]);
+  // Limpa e regrava o lineup/stats dessa partida
+  q($pdo, "DELETE FROM match_player_stats WHERE match_id = ?", [$id]);
+  q($pdo, "DELETE FROM match_players WHERE match_id = ?", [$id]);
 
-    $insertMp = $pdo->prepare("
-      INSERT INTO match_players(
-        match_id, club_name, player_id, opponent_player_id,
-        role, position, sort_order, entered, player_type
-      )
-      VALUES(?,?,?,?,?,?,?,?,?)
-    ");
+  $insertMp = $pdo->prepare("
+    INSERT INTO match_players(
+      match_id, club_name, player_id, opponent_player_id,
+      role, position, sort_order, entered, player_type
+    )
+    VALUES(?,?,?,?,?,?,?,?,?)
+  ");
 
-    $insertPalSt = $pdo->prepare("
-      INSERT INTO match_player_stats(
-        match_id, club_name, player_id,
-        goals_for, goals_against, assists,
-        yellow_cards, red_cards, rating, motm
-      )
-      VALUES(?,?,?,?,?,?,?,?,?,?)
-    ");
+  $insertSt = $pdo->prepare("
+    INSERT INTO match_player_stats(
+      match_id, club_name, player_id, opponent_player_id,
+      goals_for, goals_against, assists,
+      yellow_cards, red_cards, rating, motm
+    )
+    VALUES(?,?,?,?,?,?,?,?,?,?,?)
+  ");
 
-    $insertOppSt = $pdo->prepare("
-      INSERT INTO opponent_match_player_stats(
-        match_id, club_name, opponent_player_id,
-        goals_for, goals_against, assists,
-        yellow_cards, red_cards, rating, motm
-      )
-      VALUES(?,?,?,?,?,?,?,?,?,?)
-    ");
+  $count = [];
 
-    $count = [];
-    $sortOrder = 0;
+  foreach ($rows as $i => $r) {
+    $club = (string)($r['club'] ?? '');
+    $role = (string)($r['role'] ?? '');
+    if (!isset($clubs[$club])) continue;
+    if ($role !== 'starter' && $role !== 'bench') continue;
 
-    foreach ($rows as $idx => $r) {
-      $club = (string)($r['club'] ?? '');
-      $role = (string)($r['role'] ?? '');
-      if (!isset($clubs[$club])) continue;
-      if ($role !== 'starter' && $role !== 'bench') continue;
+    if (!isset($count[$club])) $count[$club] = ['starter'=>0, 'bench'=>0];
 
-      if (!isset($count[$club])) $count[$club] = ['starter'=>0, 'bench'=>0];
+    $limit = ($role === 'starter') ? 11 : 9;
+    if ($count[$club][$role] >= $limit) continue;
+    $count[$club][$role]++;
 
-      $limit = ($role === 'starter') ? 11 : 9;
-      if ($count[$club][$role] >= $limit) continue;
-      $count[$club][$role]++;
+    $position = (string)($r['position'] ?? '');
 
-      $position = (string)($r['position'] ?? '');
+    $pid = null;
+    $opid = null;
+    $playerType = 'HOME';
 
-      $pid = null;
-      $opid = null;
+    // Palmeiras: player_id (players)
+    if (strcasecmp($club, $PAL) === 0) {
+      $pid = (int)($r['player_id'] ?? 0);
+      if ($pid <= 0) continue;
       $playerType = 'HOME';
-
-      $isPal = (strcasecmp($club, $PAL) === 0);
-
-      if ($isPal) {
-        $pid = (int)($r['player_id'] ?? 0);
-        if ($pid <= 0) continue;
-        $playerType = 'HOME';
-      } else {
-        $opid = (int)($r['opponent_player_id'] ?? 0);
-        if ($opid <= 0) continue;
-        $playerType = 'AWAY';
-      }
-
-      $insertMp->execute([
-        $id, $club, $pid, $opid,
-        strtoupper($role), $position, $sortOrder++, 0, $playerType
-      ]);
-
-      // Apenas 1 MVP por partida
-      $isMvp = ($mvpRow !== '' && (string)$idx === $mvpRow) ? 1 : 0;
-
-      if ($isPal) {
-        $insertPalSt->execute([
-          $id, $club, $pid,
-          (int)($r['goals_for'] ?? 0),
-          (int)($r['goals_against'] ?? 0),
-          (int)($r['assists'] ?? 0),
-          (int)($r['yellow_cards'] ?? 0),
-          (int)($r['red_cards'] ?? 0),
-          ($r['rating'] ?? null),
-          $isMvp
-        ]);
-      } else {
-        $insertOppSt->execute([
-          $id, $club, $opid,
-          (int)($r['goals_for'] ?? 0),
-          (int)($r['goals_against'] ?? 0),
-          (int)($r['assists'] ?? 0),
-          (int)($r['yellow_cards'] ?? 0),
-          (int)($r['red_cards'] ?? 0),
-          ($r['rating'] ?? null),
-          $isMvp
-        ]);
-      }
+    } else {
+      // Adversário: opponent_player_id (opponent_players)
+      $opid = (int)($r['opponent_player_id'] ?? 0);
+      if ($opid <= 0) continue;
+      $playerType = 'AWAY';
     }
 
-    $pdo->commit();
-    redirect('/?page=match&id='.$id);
-  } catch (Throwable $e) {
-    $pdo->rollBack();
-    throw $e;
+    $insertMp->execute([
+      $id, $club, $pid, $opid,
+      strtoupper($role), $position, (int)$i, 0, $playerType
+    ]);
+
+    $insertSt->execute([
+      $id, $club, $pid, $opid,
+      (int)($r['goals_for'] ?? 0),
+      (int)($r['goals_against'] ?? 0),
+      (int)($r['assists'] ?? 0),
+      (int)($r['yellow_cards'] ?? 0),
+      (int)($r['red_cards'] ?? 0),
+      ($r['rating'] ?? null),
+      isset($r['motm']) ? 1 : 0
+    ]);
   }
+
+  $pdo->commit();
+  redirect('/?page=match&id='.$id);
 }
 
 /* ================= UI ================= */
@@ -255,7 +207,7 @@ function render_table(string $club, array $data, array $palPlayers, array $oppPl
   echo '<div class="card-soft p-3">';
   echo '<h5 class="mb-3">'.h($club).'</h5>';
 
-  foreach (["starter" => "Titulares (11)", "bench" => "Reservas (9)"] as $type => $label) {
+  foreach (['starter' => 'Titulares (11)', 'bench' => 'Reservas (9)'] as $type => $label) {
 
     echo '<h6 class="mt-3">'.h($label).'</h6>';
     echo '<table class="table table-dark table-sm">';
@@ -331,9 +283,8 @@ function render_table(string $club, array $data, array $palPlayers, array $oppPl
           style="max-width:65px;">
       </td>';
 
-      // MVP (apenas 1 por partida)
       echo '<td class="text-center">
-        <input type="checkbox" class="mvp-checkbox" name="mvp_row" value="'.h($idx).'" '.$motm.'>
+        <input type="checkbox" name="rows['.h($idx).'][motm]" value="1" '.$motm.'>
       </td>';
 
       echo '<input type="hidden" name="rows['.h($idx).'][club]" value="'.h($club).'">';
@@ -358,26 +309,3 @@ echo '<div class="text-end mt-3">
 echo '</form>';
 
 render_footer();
-
-echo <<<HTML
-<script>
-(function () {
-  const boxes = Array.from(document.querySelectorAll('.mvp-checkbox'));
-  if (!boxes.length) return;
-
-  // Se por algum motivo vierem várias marcadas (dados antigos), mantém só a primeira
-  const checked = boxes.filter(b => b.checked);
-  if (checked.length > 1) checked.slice(1).forEach(b => b.checked = false);
-
-  boxes.forEach(box => {
-    box.addEventListener('change', function () {
-      if (!this.checked) return; // permite deixar sem MVP se desmarcar
-
-      boxes.forEach(b => {
-        if (b !== this) b.checked = false;
-      });
-    });
-  });
-})();
-</script>
-HTML;
