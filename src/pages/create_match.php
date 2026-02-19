@@ -433,7 +433,7 @@ function render_table_create(
 
   echo '<h6 class="mt-3">'.h($label).'</h6>';
   echo '<div class="table-responsive">';
-  echo '<table class="table table-dark table-sm align-middle mb-0">';
+  echo '<table class="table table-sm align-middle mb-0">';
   echo '<thead><tr class="text-center">
     <th style="width:80px;">POS</th>
     <th>Atleta</th>
@@ -537,7 +537,7 @@ function ensure_match_substitutions_table(PDO $pdo): void {
 function render_subs_block(string $prefix, string $title): void {
   echo '<h6 class="mt-3">'.h($title).'</h6>';
   echo '<div class="table-responsive">';
-  echo '<table class="table table-dark table-sm align-middle mb-0">';
+  echo '<table class="table table-sm align-middle mb-0">';
   echo '<thead><tr class="text-center">
     <th style="width:90px;">MIN</th>
     <th>SAI</th>

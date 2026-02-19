@@ -127,7 +127,7 @@ function get_stats_for_row(array $r, array $stats): array {
 
 function render_block(array $slots, array $stats): void {
   echo '<div class="table-responsive">';
-  echo '<table class="table table-dark table-sm align-middle mb-0">';
+  echo '<table class="table table-sm align-middle mb-0">';
   echo '<thead><tr class="text-center">
     <th style="width:80px;">POS</th>
     <th>Atleta</th>
@@ -189,7 +189,7 @@ function render_subs(PDO $pdo, int $matchId, string $side): void {
 
   echo '<h6 class="mt-3">Substituições</h6>';
   echo '<div class="table-responsive">';
-  echo '<table class="table table-dark table-sm align-middle mb-0">';
+  echo '<table class="table table-sm align-middle mb-0">';
   echo '<thead><tr class="text-center">
     <th style="width:90px;">MIN</th>
     <th>SAI</th>
@@ -334,53 +334,53 @@ echo '<div class="card-soft p-3 mb-3">';
 echo '  <h5 class="mb-3">Dados do Jogo</h5>';
 echo '  <ul class="list-group list-group-flush">';
 
-echo '    <li class="list-group-item bg-transparent text-light d-flex justify-content-between align-items-start">
-            <span class="text-muted">Temporada</span>
+echo '    <li class="list-group-item bg-transparent text-body d-flex justify-content-between align-items-start">
+            <span class="text-body-secondary">Temporada</span>
             <strong>'.h(fmtv($season)).'</strong>
           </li>';
 
-echo '    <li class="list-group-item bg-transparent text-light d-flex justify-content-between align-items-start">
-            <span class="text-muted">Competição</span>
+echo '    <li class="list-group-item bg-transparent text-body d-flex justify-content-between align-items-start">
+            <span class="text-body-secondary">Competição</span>
             <strong class="text-end" title="'.h(fmtv($competition)).'">'.h(fmtv($competition)).'</strong>
           </li>';
 
-echo '    <li class="list-group-item bg-transparent text-light d-flex justify-content-between align-items-start">
-            <span class="text-muted">Data</span>
+echo '    <li class="list-group-item bg-transparent text-body d-flex justify-content-between align-items-start">
+            <span class="text-body-secondary">Data</span>
             <strong>'.h($dateFmt).' '.($timeFmt !== '-' ? 'às '.h($timeFmt) : '').'</strong>
           </li>';
 
-echo '    <li class="list-group-item bg-transparent text-light d-flex justify-content-between align-items-start">
-            <span class="text-muted">Fase</span>
+echo '    <li class="list-group-item bg-transparent text-body d-flex justify-content-between align-items-start">
+            <span class="text-body-secondary">Fase</span>
             <strong>'.h(fmtv($phase)).'</strong>
           </li>';
 
-echo '    <li class="list-group-item bg-transparent text-light d-flex justify-content-between align-items-start">
-            <span class="text-muted">Rodada</span>
+echo '    <li class="list-group-item bg-transparent text-body d-flex justify-content-between align-items-start">
+            <span class="text-body-secondary">Rodada</span>
             <strong>'.h(fmtv($round)).'</strong>
           </li>';
 
-echo '    <li class="list-group-item bg-transparent text-light d-flex justify-content-between align-items-start">
-            <span class="text-muted">Estádio</span>
+echo '    <li class="list-group-item bg-transparent text-body d-flex justify-content-between align-items-start">
+            <span class="text-body-secondary">Estádio</span>
             <strong class="text-end" title="'.h(fmtv($stadium)).'">'.h(fmtv($stadium)).'</strong>
           </li>';
 
-echo '    <li class="list-group-item bg-transparent text-light d-flex justify-content-between align-items-start">
-            <span class="text-muted">Árbitro</span>
+echo '    <li class="list-group-item bg-transparent text-body d-flex justify-content-between align-items-start">
+            <span class="text-body-secondary">Árbitro</span>
             <strong class="text-end" title="'.h(fmtv($referee)).'">'.h(fmtv($referee)).'</strong>
           </li>';
 
-echo '    <li class="list-group-item bg-transparent text-light d-flex justify-content-between align-items-start">
-            <span class="text-muted">Clima</span>
+echo '    <li class="list-group-item bg-transparent text-body d-flex justify-content-between align-items-start">
+            <span class="text-body-secondary">Clima</span>
             <strong>'.h(fmtv($weather)).'</strong>
           </li>';
 
-echo '    <li class="list-group-item bg-transparent text-light d-flex justify-content-between align-items-start">
-            <span class="text-muted">Uniforme</span>
+echo '    <li class="list-group-item bg-transparent text-body d-flex justify-content-between align-items-start">
+            <span class="text-body-secondary">Uniforme</span>
             <strong>'.h(fmtv($kitUsed)).'</strong>
           </li>';
 
-echo '    <li class="list-group-item bg-transparent text-light text-center" style="font-size:1.15rem;">
-            <span class="text-muted d-block mb-1">Placar</span>
+echo '    <li class="list-group-item bg-transparent text-body text-center" style="font-size:1.15rem;">
+            <span class="text-body-secondary d-block mb-1">Placar</span>
             <strong>'.h($homeName).' '.h($hs).' x '.h($as).' '.h($awayName).'</strong>
           </li>';
 
@@ -412,3 +412,5 @@ echo '</div></div>';
 echo '</div>';
 
 render_footer();
+
+

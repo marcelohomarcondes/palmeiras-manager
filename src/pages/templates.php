@@ -304,7 +304,7 @@ echo '</form>';
 if (!$slots) {
   echo '<div class="text-muted">Nenhum slot definido ainda.</div>';
 } else {
-  echo '<div class="table-responsive"><table class="table table-dark table-sm align-middle mb-0">';
+  echo '<div class="table-responsive"><table class="table table-sm align-middle mb-0">';
   echo '<thead><tr><th>Role</th><th class="mono">Ordem</th><th>#</th><th>Atleta</th><th>POS</th></tr></thead><tbody>';
 
   foreach ($slots as $s) {
