@@ -649,7 +649,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     // Prepared statements
     $insMatchPlayers = $pdo->prepare("
       INSERT INTO match_players(match_id, club_name, player_id, opponent_player_id, role, position, sort_order, entered, player_type)
-      VALUES(?, ?, ?, ?, ?, ?, ?, 1, ?)
+      VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
     ");
 
     $selOpp = $pdo->prepare("SELECT id FROM opponent_players WHERE club_name=? COLLATE NOCASE AND name=? COLLATE NOCASE LIMIT 1");
@@ -657,7 +657,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 
     // Palmeiras roster
     foreach ($palRows as $r) {
-      $insMatchPlayers->execute([$matchId, $club, (int)$r['player_id'], null, $r['role'], $r['position'], (int)$r['sort_order'], $palType]);
+      $insMatchPlayers->execute([$matchId, $club, (int)$r['player_id'], null, $r['role'], $r['position'], (int)$r['sort_order'], ($r['role']==='STARTER'?1:0), $palType]);
 
       // match_player_stats (criar linha default)
       if ($hasPalStats && isset($palStatsInfo['match_id']) && isset($palStatsInfo['player_id'])) {
@@ -717,7 +717,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         $oppId = (int)$pdo->lastInsertId();
       }
 
-      $insMatchPlayers->execute([$matchId, $oppClub, null, $oppId, $r['role'], $r['position'], (int)$r['sort_order'], $oppType]);
+      $insMatchPlayers->execute([$matchId, $oppClub, null, $oppId, $r['role'], $r['position'], (int)$r['sort_order'], ($r['role']==='STARTER'?1:0), $oppType]);
 
       // opponent_match_player_stats (corrigido: club_name NOT NULL)
       if ($hasOppStats && isset($oppStatsInfo['match_id']) && isset($oppStatsInfo['opponent_player_id'])) {

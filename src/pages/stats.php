@@ -60,6 +60,31 @@ function render_table(array $headers, array $rows, array $keys, int $colspanIfEm
   echo '</tbody></table></div>';
 }
 
+if (!function_exists('render_table_scroll')) {
+  function render_table_scroll(array $headers, array $rows, array $keys, int $colspanIfEmpty, int $maxHeightPx = 340): void {
+    echo '<div class="table-responsive" style="max-height: '.(int)$maxHeightPx.'px; overflow-y: auto;">';
+    echo '<table class="table table-sm mb-0">';
+    echo '<thead><tr>';
+    foreach ($headers as $hh) echo '<th>'.h((string)$hh).'</th>';
+    echo '</tr></thead><tbody>';
+
+    if (!$rows) {
+      echo '<tr><td colspan="'.(int)$colspanIfEmpty.'" class="text-muted">Sem dados.</td></tr>';
+    } else {
+      foreach ($rows as $r) {
+        echo '<tr>';
+        foreach ($keys as $k) {
+          echo '<td>'.h((string)($r[$k] ?? '')).'</td>';
+        }
+        echo '</tr>';
+      }
+    }
+
+    echo '</tbody></table></div>';
+  }
+}
+
+
 function compute_streaks(array $matches): array {
   $best = [
     'unbeaten' => ['len'=>0,'start'=>null,'end'=>null],
@@ -352,7 +377,7 @@ $sqlTopGames = "
   $whereSql
   " . ($whereSql ? "AND" : "WHERE") . " $isClubInMatch
     AND UPPER(TRIM(mp.club_name)) = $clubNorm
-    AND COALESCE(mp.entered,0) = 1
+    AND (mp.role = 'STARTER' OR COALESCE(mp.entered,0) = 1)
   GROUP BY mp.player_id
   ORDER BY games DESC, player_name ASC
   LIMIT 100
@@ -369,7 +394,7 @@ $sqlCleanSheets = "
   $whereSql
   " . ($whereSql ? "AND" : "WHERE") . " $isClubInMatch
     AND UPPER(TRIM(mp.club_name)) = $clubNorm
-    AND COALESCE(mp.entered,0) = 1
+    AND (mp.role = 'STARTER' OR COALESCE(mp.entered,0) = 1)
     AND UPPER(TRIM(mp.position)) IN ('GK','GOL','GOLEIRO')
     AND ($clubGA) = 0
   GROUP BY mp.player_id
@@ -391,7 +416,7 @@ if ($matches) {
     FROM match_players mp
     WHERE mp.match_id IN ($in)
       AND UPPER(TRIM(mp.club_name)) = UPPER(TRIM(?))
-      AND COALESCE(mp.entered,0) = 1
+      AND (mp.role = 'STARTER' OR COALESCE(mp.entered,0) = 1)
   ";
   $st = $pdo->prepare($sqlPlays);
   $params = array_merge($matchIds, [$club]);
@@ -447,16 +472,21 @@ $mpStatsAvailable = false;
 
 if (table_exists($pdo, 'match_player_stats')) {
   $cols = table_columns($pdo, 'match_player_stats');
-  $hasGoals   = in_array('goals', $cols, true);
+  $goalsCol   = in_array('goals_for', $cols, true) ? 'goals_for' : (in_array('goals', $cols, true) ? 'goals' : '');
+  $hasGoals   = ($goalsCol !== '');
   $hasAssists = in_array('assists', $cols, true);
 
   if ($hasGoals || $hasAssists) {
     $mpStatsAvailable = true;
 
+    // Só conta quem participou: STARTER ou entered=1
+    $joinPlayed = "JOIN match_players mp ON mp.match_id = mps.match_id AND mp.player_id = mps.player_id AND UPPER(TRIM(mp.club_name)) = UPPER(TRIM(mps.club_name)) AND (mp.role='STARTER' OR COALESCE(mp.entered,0)=1)";
+
     if ($hasGoals) {
       $sql = "
-        SELECT p.name AS player_name, SUM(COALESCE(mps.goals,0)) AS goals
+        SELECT p.name AS player_name, SUM(COALESCE(mps.".$goalsCol.",0)) AS goals
         FROM match_player_stats mps
+        $joinPlayed
         JOIN players p ON p.id = mps.player_id
         JOIN matches m ON m.id = mps.match_id
         $whereSql
@@ -476,6 +506,7 @@ if (table_exists($pdo, 'match_player_stats')) {
       $sql = "
         SELECT p.name AS player_name, SUM(COALESCE(mps.assists,0)) AS assists
         FROM match_player_stats mps
+        $joinPlayed
         JOIN players p ON p.id = mps.player_id
         JOIN matches m ON m.id = mps.match_id
         $whereSql
@@ -939,7 +970,7 @@ echo '            </div>';
 echo '          </div>';
 
 echo '          <div class="text-muted small mt-2">';
-echo '            Observação: Gols/Assistências dependem da tabela <code>match_player_stats</code> com colunas <code>goals</code>/<code>assists</code>.';
+echo '            Observação: Gols/Assistências dependem da tabela <code>match_player_stats</code> com colunas <code>goals_for</code> (ou <code>goals</code>) e <code>assists</code>.';
 echo '          </div>';
 
 echo '        </div>';
@@ -1001,7 +1032,7 @@ echo '    <h5 class="mb-2">Top 10 artilheiros</h5>';
 if ($mpStatsAvailable) {
   render_table(['Jogador','Gols'], $topScorers, ['player_name','goals'], 2);
 } else {
-  echo '<div class="text-muted">Sem dados: tabela <code>match_player_stats</code> não encontrada (ou sem colunas <code>goals</code>).</div>';
+  echo '<div class="text-muted">Sem dados: tabela <code>match_player_stats</code> não encontrada (ou sem colunas <code>goals_for</code>/<code>goals</code>).</div>';
 }
 echo '  </div>';
 echo '</div>';
@@ -1032,7 +1063,7 @@ echo '</div>';
 echo '<div class="col-12 col-lg-8">';
 echo '  <div class="card-soft p-3">';
 echo '    <h5 class="mb-2">Top 100 jogadores com mais jogos</h5>';
-render_table(['Jogador','Jogos'], $topGames100, ['player_name','games'], 2);
+render_table_scroll(['Jogador','Jogos'], $topGames100, ['player_name','games'], 2, 340);
 echo '  </div>';
 echo '</div>';
 
