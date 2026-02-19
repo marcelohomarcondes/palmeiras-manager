@@ -122,6 +122,7 @@ if (!$rows) {
     // Ações: Abrir + Excluir
     echo '<td class="text-end" style="white-space:nowrap;">';
     echo '  <a class="btn btn-sm btn-outline-primary" href="/?page=match&id=' . $id . '">Abrir</a> ';
+    echo '  <a class="btn btn-sm btn-outline-warning" href="/?page=create_match&id=' . $id . '">Editar</a> ';
 
     echo '  <form method="post" action="/?page=matches&action=delete" style="display:inline-block;" onsubmit="return confirm(\'Excluir esta partida? Essa ação não pode ser desfeita.\')">';
     echo '    <input type="hidden" name="match_id" value="' . $id . '">';

@@ -134,6 +134,216 @@ $err = trim((string)($_GET['err'] ?? ''));
 $msg = trim((string)($_GET['msg'] ?? ''));
 
 /* =========================================================
+   EDIT MODE (pré-preenchimento ao abrir com ?page=create_match&id=XX)
+   - Não altera front-end: apenas injeta valores em $_POST/$_GET para o form já existente
+   ========================================================= */
+$editId = (int)($_GET['id'] ?? 0);
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' && $editId > 0) {
+
+  // Partida
+  $mrow = q($pdo, "SELECT * FROM matches WHERE id = ? LIMIT 1", [$editId])->fetch(PDO::FETCH_ASSOC);
+  if (!$mrow) {
+    redirect('/?page=matches&err=not_found');
+  }
+
+  // Descobre lado do Palmeiras
+  $homeName = (string)($mrow['home'] ?? ($mrow['home_team'] ?? ''));
+  $awayName = (string)($mrow['away'] ?? ($mrow['away_team'] ?? ''));
+  $isHomePal = (strcasecmp($homeName, $club) === 0);
+  $palType   = $isHomePal ? 'HOME' : 'AWAY';
+  $oppType   = $isHomePal ? 'AWAY' : 'HOME';
+  $oppClub   = $isHomePal ? $awayName : $homeName;
+
+  // Campos simples do form (se existirem na tabela matches)
+  foreach ($mrow as $k => $v) {
+    $val = ($v === null) ? '' : (string)$v;
+    $_GET[$k]  = $val;   // para fval()
+    $_POST[$k] = $val;  // para postv()
+  }
+
+  // Match id para salvar como UPDATE
+  $_POST['match_id'] = (string)$editId;
+
+  // Zera slots
+  for ($i=0;$i<11;$i++){
+    $_POST["pal_pid_starter_$i"] = $_POST["pal_pid_starter_$i"] ?? '0';
+    $_POST["pal_pos_starter_$i"] = $_POST["pal_pos_starter_$i"] ?? '';
+    $_POST["opp_name_starter_$i"] = $_POST["opp_name_starter_$i"] ?? '';
+    $_POST["opp_pos_starter_$i"]  = $_POST["opp_pos_starter_$i"] ?? '';
+  }
+  for ($i=0;$i<9;$i++){
+    $_POST["pal_pid_bench_$i"] = $_POST["pal_pid_bench_$i"] ?? '0';
+    $_POST["pal_pos_bench_$i"] = $_POST["pal_pos_bench_$i"] ?? '';
+    $_POST["opp_name_bench_$i"] = $_POST["opp_name_bench_$i"] ?? '';
+    $_POST["opp_pos_bench_$i"]  = $_POST["opp_pos_bench_$i"] ?? '';
+  }
+
+  // Slots da partida
+  $mpr = q($pdo, "
+    SELECT role, sort_order, position, player_id, opponent_player_id
+    FROM match_players
+    WHERE match_id = ?
+    ORDER BY role ASC, sort_order ASC
+  ", [$editId])->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+  $needOppNames = [];
+  foreach ($mpr as $r) {
+    $roleU = strtoupper(trim((string)($r['role'] ?? '')));
+    $roleL = ($roleU === 'STARTER') ? 'starter' : (($roleU === 'BENCH') ? 'bench' : '');
+    $i = (int)($r['sort_order'] ?? -1);
+    if ($roleL === '' || $i < 0) continue;
+
+    $pos = (string)($r['position'] ?? '');
+
+    if (!empty($r['player_id'])) {
+      $_POST["pal_pid_{$roleL}_{$i}"] = (string)((int)$r['player_id']);
+      $_POST["pal_pos_{$roleL}_{$i}"] = $pos;
+    } elseif (!empty($r['opponent_player_id'])) {
+      $oid = (int)$r['opponent_player_id'];
+      $needOppNames[$oid] = true;
+      $_POST["opp_pos_{$roleL}_{$i}"] = $pos;
+      $_POST["_tmp_opp_id_{$roleL}_{$i}"] = (string)$oid;
+    }
+  }
+
+  // Resolve nomes do adversário por ID
+  if ($needOppNames) {
+    $ids = array_keys($needOppNames);
+    $in  = implode(',', array_fill(0, count($ids), '?'));
+    $opRows = q($pdo, "SELECT id, name FROM opponent_players WHERE id IN ($in)", $ids)->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $map = [];
+    foreach ($opRows as $o) $map[(int)$o['id']] = (string)$o['name'];
+
+    foreach (['starter'=>11,'bench'=>9] as $roleL => $max) {
+      for ($i=0;$i<$max;$i++){
+        $k = "_tmp_opp_id_{$roleL}_{$i}";
+        if (!isset($_POST[$k])) continue;
+        $oid = (int)$_POST[$k];
+        $_POST["opp_name_{$roleL}_{$i}"] = $map[$oid] ?? '';
+        unset($_POST[$k]);
+      }
+    }
+  }
+
+  // Stats + MVP (Palmeiras)
+  if (table_exists($pdo, 'match_player_stats')) {
+    $cols = table_info($pdo, 'match_player_stats');
+    $rows = q($pdo, "SELECT * FROM match_player_stats WHERE match_id = ?", [$editId])->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $byPid = [];
+    foreach ($rows as $s) {
+      $pid = (int)($s['player_id'] ?? 0);
+      if ($pid > 0) $byPid[$pid] = $s;
+    }
+
+    foreach (['starter'=>11,'bench'=>9] as $roleL => $max) {
+      for ($i=0;$i<$max;$i++){
+        $pid = (int)($_POST["pal_pid_{$roleL}_{$i}"] ?? 0);
+        if ($pid <= 0) continue;
+        $s = $byPid[$pid] ?? null;
+        if (!$s) continue;
+
+        $gf = isset($cols['goals_for']) ? (int)($s['goals_for'] ?? 0) : (int)($s['goals'] ?? 0);
+        $as = (int)($s['assists'] ?? 0);
+        $gc = isset($cols['goals_against']) ? (int)($s['goals_against'] ?? 0) : (isset($cols['own_goals']) ? (int)($s['own_goals'] ?? 0) : 0);
+        $yc = isset($cols['yellow_cards']) ? (int)($s['yellow_cards'] ?? 0) : (int)($s['yellow'] ?? 0);
+        $rc = isset($cols['red_cards']) ? (int)($s['red_cards'] ?? 0) : (int)($s['red'] ?? 0);
+        $rt = (string)($s['rating'] ?? '');
+        $mvp = isset($cols['is_mvp']) ? (int)($s['is_mvp'] ?? 0) : (int)($s['motm'] ?? 0);
+
+        $_POST["pal_g_{$roleL}_{$i}"] = (string)$gf;
+        $_POST["pal_a_{$roleL}_{$i}"] = (string)$as;
+        $_POST["pal_og_{$roleL}_{$i}"] = (string)$gc;
+        $_POST["pal_y_{$roleL}_{$i}"] = (string)$yc;
+        $_POST["pal_r_{$roleL}_{$i}"] = (string)$rc;
+        $_POST["pal_rating_{$roleL}_{$i}"] = $rt;
+
+        if ($mvp === 1) $_POST['mvp'] = "pal_{$roleL}_{$i}";
+      }
+    }
+  }
+
+  // Stats + MVP (Adversário)
+  if (table_exists($pdo, 'opponent_match_player_stats')) {
+    $cols = table_info($pdo, 'opponent_match_player_stats');
+    $rows = q($pdo, "SELECT * FROM opponent_match_player_stats WHERE match_id = ?", [$editId])->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $byOid = [];
+    foreach ($rows as $s) {
+      $oid = (int)($s['opponent_player_id'] ?? 0);
+      if ($oid > 0) $byOid[$oid] = $s;
+    }
+
+    // oid por slot (derivado dos match_players)
+    $oidBySlot = ['starter'=>[], 'bench'=>[]];
+    foreach ($mpr as $r) {
+      if (empty($r['opponent_player_id'])) continue;
+      $roleU = strtoupper(trim((string)($r['role'] ?? '')));
+      $roleL = ($roleU === 'STARTER') ? 'starter' : (($roleU === 'BENCH') ? 'bench' : '');
+      $i = (int)($r['sort_order'] ?? -1);
+      if ($roleL === '' || $i < 0) continue;
+      $oidBySlot[$roleL][$i] = (int)$r['opponent_player_id'];
+    }
+
+    foreach (['starter'=>11,'bench'=>9] as $roleL => $max) {
+      for ($i=0;$i<$max;$i++){
+        $oid = (int)($oidBySlot[$roleL][$i] ?? 0);
+        if ($oid <= 0) continue;
+        $s = $byOid[$oid] ?? null;
+        if (!$s) continue;
+
+        $gf = isset($cols['goals_for']) ? (int)($s['goals_for'] ?? 0) : (int)($s['goals'] ?? 0);
+        $as = (int)($s['assists'] ?? 0);
+        $gc = isset($cols['goals_against']) ? (int)($s['goals_against'] ?? 0) : (isset($cols['own_goals']) ? (int)($s['own_goals'] ?? 0) : 0);
+        $yc = isset($cols['yellow_cards']) ? (int)($s['yellow_cards'] ?? 0) : (int)($s['yellow'] ?? 0);
+        $rc = isset($cols['red_cards']) ? (int)($s['red_cards'] ?? 0) : (int)($s['red'] ?? 0);
+        $rt = (string)($s['rating'] ?? '');
+        $mvp = isset($cols['is_mvp']) ? (int)($s['is_mvp'] ?? 0) : (int)($s['motm'] ?? 0);
+
+        $_POST["opp_g_{$roleL}_{$i}"] = (string)$gf;
+        $_POST["opp_a_{$roleL}_{$i}"] = (string)$as;
+        $_POST["opp_og_{$roleL}_{$i}"] = (string)$gc;
+        $_POST["opp_y_{$roleL}_{$i}"] = (string)$yc;
+        $_POST["opp_r_{$roleL}_{$i}"] = (string)$rc;
+        $_POST["opp_rating_{$roleL}_{$i}"] = $rt;
+
+        if ($mvp === 1) $_POST['mvp'] = "opp_{$roleL}_{$i}";
+      }
+    }
+  }
+
+  // Substituições (pal = ids / opp = nomes)
+  if (table_exists($pdo, 'match_substitutions')) {
+    $subs = q($pdo, "SELECT * FROM match_substitutions WHERE match_id = ? ORDER BY sort_order ASC, id ASC", [$editId])->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    // Mapa id->nome do adversário
+    $oppNameById = [];
+    $oppAll = q($pdo, "SELECT id, name FROM opponent_players WHERE club_name=? COLLATE NOCASE", [$oppClub])->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    foreach ($oppAll as $o) $oppNameById[(int)$o['id']] = (string)$o['name'];
+
+    $p = 0; $o = 0;
+    foreach ($subs as $s) {
+      $side = strtoupper((string)($s['side'] ?? ''));
+      $min  = (string)($s['minute'] ?? '');
+
+      if ($side === $palType && $p < 5) {
+        $_POST["pal_sub_min_$p"] = $min;
+        $_POST["pal_sub_out_$p"] = (string)((int)($s['player_out_id'] ?? 0));
+        $_POST["pal_sub_in_$p"]  = (string)((int)($s['player_in_id'] ?? 0));
+        $p++;
+      } elseif ($side === $oppType && $o < 5) {
+        $_POST["opp_sub_min_$o"] = $min;
+        $outId = (int)($s['opponent_out_id'] ?? 0);
+        $inId  = (int)($s['opponent_in_id'] ?? 0);
+        $_POST["opp_sub_out_$o"] = $oppNameById[$outId] ?? '';
+        $_POST["opp_sub_in_$o"]  = $oppNameById[$inId] ?? '';
+        $o++;
+      }
+    }
+  }
+
+}
+
+
+/* =========================================================
    Palmeiras players
    ========================================================= */
 
@@ -638,13 +848,36 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     if ($colAwayScore) $matchData[$colAwayScore] = ($away_score_raw==='' ? null : (int)$away_score_raw);
 
     $now = date('Y-m-d H:i:s');
-    if (isset($matchesInfo['created_at'])) $matchData['created_at'] = $now;
-    if (isset($matchesInfo['updated_at'])) $matchData['updated_at'] = $now;
 
-    $mCols = array_keys($matchData);
-    $mPh   = array_fill(0, count($mCols), '?');
-    q($pdo, "INSERT INTO matches(".implode(',', $mCols).") VALUES(".implode(',', $mPh).")", array_values($matchData));
-    $matchId = (int)$pdo->lastInsertId();
+    // Modo edição: se vier match_id, faz UPDATE e regrava dependências
+    $editMatchId = to_int(postv('match_id'), 0);
+    $isEdit = ($editMatchId > 0);
+
+    if ($isEdit) {
+      // created_at não deve ser alterado ao editar
+      if (isset($matchesInfo['updated_at'])) $matchData['updated_at'] = $now;
+
+      $mCols = array_keys($matchData);
+      $set = implode(',', array_map(fn($c) => $c.'=?', $mCols));
+      q($pdo, "UPDATE matches SET $set WHERE id = ?", array_merge(array_values($matchData), [$editMatchId]));
+      $matchId = $editMatchId;
+
+      // remove dados antigos para regravar exatamente o que está no formulário
+      q($pdo, "DELETE FROM match_players WHERE match_id = ?", [$matchId]);
+      if (table_exists($pdo, 'match_player_stats')) q($pdo, "DELETE FROM match_player_stats WHERE match_id = ?", [$matchId]);
+      if (table_exists($pdo, 'opponent_match_player_stats')) q($pdo, "DELETE FROM opponent_match_player_stats WHERE match_id = ?", [$matchId]);
+      if (table_exists($pdo, 'match_substitutions')) q($pdo, "DELETE FROM match_substitutions WHERE match_id = ?", [$matchId]);
+
+    } else {
+      if (isset($matchesInfo['created_at'])) $matchData['created_at'] = $now;
+      if (isset($matchesInfo['updated_at'])) $matchData['updated_at'] = $now;
+
+      $mCols = array_keys($matchData);
+      $mPh   = array_fill(0, count($mCols), '?');
+      q($pdo, "INSERT INTO matches(".implode(',', $mCols).") VALUES(".implode(',', $mPh).")", array_values($matchData));
+      $matchId = (int)$pdo->lastInsertId();
+    }
+
 
     // Prepared statements
     $insMatchPlayers = $pdo->prepare("
@@ -857,6 +1090,7 @@ if ($msg === 'tpl') {
 $mvpSelected = postv('mvp');
 
 echo '<form method="post" autocomplete="off">';
+echo '<input type="hidden" name="match_id" value="'.h((string)((postv('match_id') !== '') ? postv('match_id') : (string)($_GET['id'] ?? ''))).'">';
 
 echo '<div class="card-soft p-3 mb-3">';
 echo '<h5 class="mb-3">Dados do jogo</h5>';

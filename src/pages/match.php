@@ -275,6 +275,10 @@ $stats = load_stats($pdo, $matchId);
 
 render_header('Partida');
 
+echo '<div class="text-end mb-3">';
+echo '  <a class="btn btn-sm btn-outline-warning" href="/?page=create_match&id='.(int)$matchId.'">Editar</a>';
+echo '</div>';
+
 echo '<div class="row g-4">';
 
 // HOME
