@@ -1,0 +1,234 @@
+CREATE TABLE players (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ name TEXT NOT NULL,
+ shirt_number INTEGER,
+ primary_position TEXT,
+ secondary_positions TEXT,
+ is_active INTEGER DEFAULT 1
+, updated_at TEXT, created_at TEXT, club_name TEXT);
+CREATE TABLE sqlite_sequence(name,seq);
+CREATE TABLE matches (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ season TEXT,
+ competition TEXT,
+ match_date TEXT,
+ home TEXT,
+ away TEXT,
+ home_score INTEGER,
+ away_score INTEGER
+, phase TEXT, round TEXT, match_time TEXT, stadium TEXT, referee TEXT, kit_used TEXT, weather TEXT);
+CREATE TABLE match_player_stats (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  match_id INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  club_name TEXT NOT NULL,
+  player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE RESTRICT,
+  goals_for INTEGER NOT NULL DEFAULT 0,
+  goals_against INTEGER NOT NULL DEFAULT 0,
+  assists INTEGER NOT NULL DEFAULT 0,
+  yellow_cards INTEGER NOT NULL DEFAULT 0,
+  red_cards INTEGER NOT NULL DEFAULT 0,
+  rating REAL,          -- nota (0-10)
+  motm INTEGER NOT NULL DEFAULT 0, -- melhor em campo
+  UNIQUE(match_id, club_name, player_id)
+);
+CREATE TABLE substitutions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  match_id INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  club_name TEXT NOT NULL,
+  player_out_id INTEGER REFERENCES players(id) ON DELETE RESTRICT,
+  player_in_id INTEGER REFERENCES players(id) ON DELETE RESTRICT,
+  minute INTEGER,              -- minuto (opcional)
+  is_extra_time INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE trophies (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  competition_name TEXT NOT NULL,
+  season TEXT NOT NULL,
+  achieved_at TEXT,
+  notes TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE injuries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE RESTRICT,
+  injury_type TEXT NOT NULL,
+  injured_part TEXT NOT NULL,
+  injury_date TEXT NOT NULL,
+  recovery_time TEXT NOT NULL,
+  return_date TEXT,
+  notes TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE lineup_templates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  template_name TEXT NOT NULL UNIQUE CHECK(template_name IN ('TITULAR','RESERVA')),
+  formation TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE lineup_template_slots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  template_id INTEGER NOT NULL REFERENCES lineup_templates(id) ON DELETE CASCADE,
+  role TEXT NOT NULL CHECK(role IN ('STARTER','BENCH')),
+  sort_order INTEGER NOT NULL,
+  player_id INTEGER REFERENCES players(id) ON DELETE SET NULL,
+  position TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS "transfers" ("id" INTEGER PRIMARY KEY, "season" TEXT NOT NULL, "type" TEXT NOT NULL, "athlete_name" TEXT NOT NULL, "club_origin" TEXT NOT NULL DEFAULT '', "club_destination" TEXT NOT NULL DEFAULT '', "value" INTEGER NOT NULL, "term" TEXT NOT NULL DEFAULT '', "grade" TEXT NOT NULL DEFAULT '', "extra_player_name" TEXT NOT NULL DEFAULT '', "shirt_number_assigned" INTEGER, "transaction_date" TEXT NOT NULL, "notes" TEXT NOT NULL DEFAULT '', "value_eur_cents" INTEGER NOT NULL DEFAULT 0, player_yd INTEGER, player_id INTEGER);
+CREATE TABLE opponent_players (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  club_name TEXT NOT NULL,
+  name TEXT NOT NULL,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT
+, primary_position TEXT);
+CREATE TABLE match_players (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  match_id INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  club_name TEXT NOT NULL,
+  player_id INTEGER REFERENCES players(id) ON DELETE RESTRICT,
+  opponent_player_id INTEGER REFERENCES opponent_players(id) ON DELETE RESTRICT,
+  role TEXT NOT NULL CHECK(role IN ('STARTER','BENCH')),
+  position TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  entered INTEGER NOT NULL DEFAULT 0,
+  player_type TEXT DEFAULT 'HOME',
+  UNIQUE(match_id, club_name, player_id, opponent_player_id)
+);
+CREATE TABLE opponent_match_player_stats (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  match_id INTEGER NOT NULL,
+  club_name TEXT NOT NULL,
+  opponent_player_id INTEGER NOT NULL,
+  goals_for INTEGER NOT NULL DEFAULT 0,
+  goals_against INTEGER NOT NULL DEFAULT 0,
+  assists INTEGER NOT NULL DEFAULT 0,
+  yellow_cards INTEGER NOT NULL DEFAULT 0,
+  red_cards INTEGER NOT NULL DEFAULT 0,
+  rating REAL NOT NULL DEFAULT 0,
+  motm INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY(match_id) REFERENCES matches(id) ON DELETE CASCADE,
+  FOREIGN KEY(opponent_player_id) REFERENCES opponent_players(id) ON DELETE RESTRICT
+);
+CREATE TABLE academy_dismissed (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    club_name TEXT NOT NULL,
+    dismissed_at TEXT DEFAULT (datetime('now'))
+  );
+CREATE TABLE IF NOT EXISTS "academy_players" (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  primary_position TEXT NOT NULL,
+  secondary_positions TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  club_name TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_match_stats_match ON match_player_stats(match_id);
+CREATE INDEX idx_injuries_date ON injuries(injury_date);
+CREATE UNIQUE INDEX ux_tpl_slot ON lineup_template_slots(template_id, role, sort_order);
+CREATE INDEX idx_players_club_name ON players(club_name);
+CREATE UNIQUE INDEX idx_opponent_unique
+ON opponent_players (club_name, name);
+CREATE INDEX idx_match_players_match ON match_players(match_id);
+CREATE INDEX idx_omps_match ON opponent_match_player_stats(match_id);
+CREATE INDEX idx_omps_player ON opponent_match_player_stats(opponent_player_id);
+CREATE VIEW v_pm_matches AS
+    SELECT
+      m.*,
+      CASE
+        WHEN m.home = 'PALMEIRAS' THEN m.away
+        ELSE m.home
+      END AS opponent,
+      CASE
+        WHEN m.home = 'PALMEIRAS' THEN 'Casa'
+        ELSE 'Fora'
+      END AS venue,
+      CASE
+        WHEN m.home = 'PALMEIRAS' THEN m.home_score
+        ELSE m.away_score
+      END AS gf,
+      CASE
+        WHEN m.home = 'PALMEIRAS' THEN m.away_score
+        ELSE m.home_score
+      END AS ga,
+      CASE
+        WHEN m.home_score IS NULL OR m.away_score IS NULL THEN NULL
+        WHEN (CASE WHEN m.home = 'PALMEIRAS' THEN m.home_score ELSE m.away_score END) >
+             (CASE WHEN m.home = 'PALMEIRAS' THEN m.away_score ELSE m.home_score END) THEN 'W'
+        WHEN (CASE WHEN m.home = 'PALMEIRAS' THEN m.home_score ELSE m.away_score END) =
+             (CASE WHEN m.home = 'PALMEIRAS' THEN m.away_score ELSE m.home_score END) THEN 'D'
+        ELSE 'L'
+      END AS result,
+      CASE
+        WHEN m.home_score IS NULL OR m.away_score IS NULL THEN NULL
+        ELSE (CASE WHEN m.home = 'PALMEIRAS' THEN m.home_score ELSE m.away_score END)
+           - (CASE WHEN m.home = 'PALMEIRAS' THEN m.away_score ELSE m.home_score END)
+      END AS goal_diff
+    FROM matches m
+    WHERE m.home = 'PALMEIRAS' OR m.away = 'PALMEIRAS'
+/* v_pm_matches(id,season,competition,match_date,home,away,home_score,away_score,phase,round,match_time,stadium,referee,kit_used,weather,opponent,venue,gf,ga,result,goal_diff) */;
+CREATE VIEW v_pm_vs_opponents AS
+    SELECT
+      opponent,
+      COUNT(*) AS games,
+      SUM(CASE WHEN result = 'W' THEN 1 ELSE 0 END) AS wins,
+      SUM(CASE WHEN result = 'D' THEN 1 ELSE 0 END) AS draws,
+      SUM(CASE WHEN result = 'L' THEN 1 ELSE 0 END) AS losses,
+      SUM(gf) AS goals_for,
+      SUM(ga) AS goals_against,
+      SUM(goal_diff) AS goal_diff,
+      ROUND(
+        (SUM(CASE WHEN result = 'W' THEN 3 WHEN result = 'D' THEN 1 ELSE 0 END) * 100.0)
+        / (COUNT(*) * 3.0),
+      2) AS pct
+    FROM v_pm_matches
+    WHERE gf IS NOT NULL AND ga IS NOT NULL
+    GROUP BY opponent
+/* v_pm_vs_opponents(opponent,games,wins,draws,losses,goals_for,goals_against,goal_diff,pct) */;
+CREATE VIEW v_pm_top_blowouts AS
+    SELECT
+      match_date,
+      season,
+      competition,
+      opponent,
+      venue,
+      gf,
+      ga,
+      goal_diff,
+      result
+    FROM v_pm_matches
+    WHERE gf IS NOT NULL AND ga IS NOT NULL
+    ORDER BY goal_diff DESC, gf DESC, match_date DESC
+/* v_pm_top_blowouts(match_date,season,competition,opponent,venue,gf,ga,goal_diff,result) */;
+CREATE VIEW v_player_match_stats AS
+    SELECT
+      s.id,
+      s.match_id,
+      s.club_name,
+      s.player_id,
+      s.goals_for,
+      s.goals_against,
+      s.assists,
+      s.yellow_cards,
+      s.red_cards,
+      s.rating,
+      s.motm
+    FROM match_player_stats s
+/* v_player_match_stats(id,match_id,club_name,player_id,goals_for,goals_against,assists,yellow_cards,red_cards,rating,motm) */;
+CREATE VIEW v_pal_matches AS
+    SELECT * FROM v_pm_matches
+/* v_pal_matches(id,season,competition,match_date,home,away,home_score,away_score,phase,round,match_time,stadium,referee,kit_used,weather,opponent,venue,gf,ga,result,goal_diff) */;
+CREATE TABLE match_substitutions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      match_id INTEGER NOT NULL,
+      side TEXT NOT NULL,                 -- HOME | AWAY
+      minute INTEGER NULL,
+      player_out_id INTEGER NULL,
+      player_in_id  INTEGER NULL,
+      opponent_out_id INTEGER NULL,
+      opponent_in_id  INTEGER NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0
+    );
+CREATE INDEX idx_match_subs_match ON match_substitutions(match_id);
+CREATE INDEX idx_match_subs_side  ON match_substitutions(match_id, side);

@@ -151,55 +151,19 @@ try {
 }
 
 /* =========================================================
-   Templates (auto-detect schema)
-   - lineup_templates / lineup_template_slots
-   - templates / template_players
+   Templates (apenas do clube, se existir club_name)
    ========================================================= */
-
-function detect_templates_schema(PDO $pdo): array {
-  $tplTable = null;
-  if (table_exists($pdo, 'lineup_templates')) $tplTable = 'lineup_templates';
-  elseif (table_exists($pdo, 'templates'))    $tplTable = 'templates';
-
-  $slotTable = null;
-  if (table_exists($pdo, 'lineup_template_slots')) $slotTable = 'lineup_template_slots';
-  elseif (table_exists($pdo, 'template_players'))  $slotTable = 'template_players';
-
-  $nameCol = null;
-  $clubCol = null;
-
-  if ($tplTable) {
-    $info   = table_info($pdo, $tplTable);
-    $nameCol = pick_col($info, ['template_name','name','title']);
-    $clubCol = pick_col($info, ['club_name','club']);
-  }
-
-  return [
-    'tplTable'  => $tplTable,
-    'slotTable' => $slotTable,
-    'nameCol'   => $nameCol,
-    'clubCol'   => $clubCol,
-  ];
-}
-
-$tplSchema = detect_templates_schema($pdo);
 
 $templates = [];
 try {
-  if ($tplSchema['tplTable'] && $tplSchema['nameCol']) {
-    $tTable = $tplSchema['tplTable'];
-    $nCol   = $tplSchema['nameCol'];
-    $cCol   = $tplSchema['clubCol'];
-
-    if ($cCol) {
-      $templates = q($pdo,
-        "SELECT id, $nCol AS template_name FROM $tTable WHERE $cCol=? COLLATE NOCASE ORDER BY $nCol ASC",
-        [$club]
-      )->fetchAll(PDO::FETCH_ASSOC) ?: [];
+  if (table_exists($pdo, 'lineup_templates')) {
+    $tplInfo = table_info($pdo, 'lineup_templates');
+    if (isset($tplInfo['club_name'])) {
+      $templates = q($pdo, "SELECT id, template_name FROM lineup_templates WHERE club_name=? COLLATE NOCASE ORDER BY template_name ASC", [$club])
+        ->fetchAll(PDO::FETCH_ASSOC) ?: [];
     } else {
-      $templates = q($pdo,
-        "SELECT id, $nCol AS template_name FROM $tTable ORDER BY $nCol ASC"
-      )->fetchAll(PDO::FETCH_ASSOC) ?: [];
+      $templates = q($pdo, "SELECT id, template_name FROM lineup_templates ORDER BY template_name ASC")
+        ->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
   }
 } catch (Throwable $e) {
@@ -275,76 +239,29 @@ function render_table_create(
     if ($isPal) {
       $cur = (int)postv($pidKey, '0');
       echo '<select class="form-select form-select-sm w-100" name="'.h($pidKey).'">';
-      echo '<option value="0"></option>';
+      echo '<option value="0">--</option>';
       foreach ($palPlayers as $p) {
-        $label2 = trim((string)$p['shirt_number']) !== '' ? '#'.$p['shirt_number'].' - '.$p['name'] : $p['name'];
-        $sel = ((int)$p['id'] === $cur) ? ' selected' : '';
-        echo '<option value="'.h((string)$p['id']).'"'.$sel.'>'.h($label2).'</option>';
+        $labelP = (string)($p['name'] ?? '');
+        $num = (string)($p['shirt_number'] ?? '');
+        if ($num !== '') $labelP = $num.' - '.$labelP;
+        $sel = ((int)($p['id'] ?? 0) === $cur) ? 'selected' : '';
+        echo '<option value="'.(int)$p['id'].'" '.$sel.'>'.h($labelP).'</option>';
       }
       echo '</select>';
     } else {
-      echo '<input class="form-control form-control-sm" name="'.h($pidKey).'" value="'.h(postv($pidKey)).'" placeholder="Nome">';
+      echo '<input class="form-control form-control-sm" name="'.h($pidKey).'" value="'.h(postv($pidKey)).'" placeholder="Nome do atleta">';
     }
     echo '</td>';
 
-    echo '<td><input '.$small.' type="number" min="0" name="'.h($gKey).'" value="'.h(postv($gKey)).'"></td>';
-    echo '<td><input '.$small.' type="number" min="0" name="'.h($aKey).'" value="'.h(postv($aKey)).'"></td>';
-    echo '<td><input '.$small.' type="number" min="0" name="'.h($gcKey).'" value="'.h(postv($gcKey)).'"></td>';
-    echo '<td><input '.$small.' type="number" min="0" name="'.h($caKey).'" value="'.h(postv($caKey)).'"></td>';
-    echo '<td><input '.$small.' type="number" min="0" name="'.h($cvKey).'" value="'.h(postv($cvKey)).'"></td>';
-    echo '<td><input '.$small.' type="text" name="'.h($rtKey).'" value="'.h(postv($rtKey)).'"></td>';
+    echo '<td><input type="number" name="'.h($gKey).'"  value="'.h(postv($gKey,'0')).'"  '.$small.'></td>';
+    echo '<td><input type="number" name="'.h($aKey).'"  value="'.h(postv($aKey,'0')).'"  '.$small.'></td>';
+    echo '<td><input type="number" name="'.h($gcKey).'" value="'.h(postv($gcKey,'0')).'" '.$small.'></td>';
+    echo '<td><input type="number" name="'.h($caKey).'" value="'.h(postv($caKey,'0')).'" '.$small.'></td>';
+    echo '<td><input type="number" name="'.h($cvKey).'" value="'.h(postv($cvKey,'0')).'" '.$small.'></td>';
+    echo '<td><input type="number" step="0.1" min="0" max="10" name="'.h($rtKey).'" value="'.h(postv($rtKey,'0')).'" '.$small.'></td>';
 
-    echo '<td><input type="radio" name="mvp" value="'.h($mvpVal).'" '.$checkedMvp.'></td>';
+    echo '<td class="text-center"><input type="radio" name="mvp" value="'.h($mvpVal).'" '.$checkedMvp.'></td>';
 
-    echo '</tr>';
-  }
-
-  echo '</tbody></table></div>';
-}
-
-/* =========================================================
-   Substituições (até 5 por time)
-   ========================================================= */
-
-function ensure_match_substitutions_table(PDO $pdo): void {
-  $pdo->exec("
-    CREATE TABLE IF NOT EXISTS match_substitutions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      match_id INTEGER NOT NULL,
-      side TEXT NOT NULL,                 -- HOME | AWAY
-      minute INTEGER NULL,
-      player_out_id INTEGER NULL,
-      player_in_id  INTEGER NULL,
-      opponent_out_id INTEGER NULL,
-      opponent_in_id  INTEGER NULL,
-      sort_order INTEGER NOT NULL DEFAULT 0
-    )
-  ");
-  $pdo->exec("CREATE INDEX IF NOT EXISTS idx_match_subs_match ON match_substitutions(match_id)");
-  $pdo->exec("CREATE INDEX IF NOT EXISTS idx_match_subs_side  ON match_substitutions(match_id, side)");
-}
-
-function render_subs_block(string $prefix, string $title): void {
-  echo '<h6 class="mt-3">'.h($title).'</h6>';
-  echo '<div class="table-responsive">';
-  echo '<table class="table table-dark table-sm align-middle mb-0">';
-  echo '<thead><tr class="text-center">
-    <th style="width:90px;">MIN</th>
-    <th>SAI</th>
-    <th>ENTRA</th>
-  </tr></thead><tbody>';
-
-  for ($i=0; $i<5; $i++) {
-    $kMin = $prefix.'_sub_min_'.$i;
-    $kOut = $prefix.'_sub_out_'.$i;
-    $kIn  = $prefix.'_sub_in_'.$i;
-
-    echo '<tr class="text-center">';
-    echo '<td><input type="number" min="0" max="130" step="1" class="form-control form-control-sm text-center px-1" style="max-width:90px;margin:0 auto;" name="'.h($kMin).'" value="'.h(postv($kMin)).'"></td>';
-
-    // opções preenchidas via JS (sem quebrar padrão visual)
-    echo '<td><select class="form-select form-select-sm w-100 sub-out" data-prefix="'.h($prefix).'" data-selected="'.h(postv($kOut)).'" name="'.h($kOut).'"><option value=""></option></select></td>';
-    echo '<td><select class="form-select form-select-sm w-100 sub-in"  data-prefix="'.h($prefix).'" data-selected="'.h(postv($kIn)).'" name="'.h($kIn).'"><option value=""></option></select></td>';
     echo '</tr>';
   }
 
@@ -365,14 +282,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     if ($tplId <= 0) { redirect('?page=create_match&err=tpl'); }
 
     try {
-
-      $tplSchema = detect_templates_schema($pdo);
-      if (!$tplSchema['slotTable']) { redirect('?page=create_match&err=tpl_slots'); }
-      $slotTable = $tplSchema['slotTable'];
-
       $rows = q($pdo, "
         SELECT role, sort_order, player_id, position
-        FROM $slotTable
+        FROM lineup_template_slots
         WHERE template_id=?
         ORDER BY role ASC, sort_order ASC
       ", [$tplId])->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -413,11 +325,14 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
   $kit_used    = postv('kit_used');
   $weather     = postv('weather');
 
-  $home        = postv('home');
-  $away        = postv('away');
+  $home = strtoupper(trim(postv('home')));
+  $away = strtoupper(trim(postv('away')));
 
   $home_score_raw = postv('home_score');
   $away_score_raw = postv('away_score');
+
+  if ($season==='' || $competition==='' || $date==='' || $home==='' || $away==='') redirect('?page=create_match&err=invalid');
+  if (strlen($date) >= 4 && substr($date,0,4) !== $season) redirect('?page=create_match&err=season_mismatch');
 
   $isHomePal = (strcasecmp($home, $club) === 0);
   $isAwayPal = (strcasecmp($away, $club) === 0);
@@ -437,78 +352,30 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
   for ($i=0;$i<$MAX_STARTERS;$i++) {
     $pid = to_int(postv("pal_pid_starter_$i"), 0);
     $pos = postv("pal_pos_starter_$i");
-
-    $g  = to_int(postv("pal_g_starter_$i"), 0);
-    $a  = to_int(postv("pal_a_starter_$i"), 0);
-    $gc = to_int(postv("pal_og_starter_$i"), 0); // GC = gols contra (own goals)
-    $ca = to_int(postv("pal_y_starter_$i"), 0);
-    $cv = to_int(postv("pal_r_starter_$i"), 0);
-    $rt = to_float(postv("pal_rating_starter_$i"), 0.0);
-
     if ($pid>0 && $pos!=='') {
-      $palRows[] = [
-        'role'=>'STARTER','sort_order'=>$i,'player_id'=>$pid,'position'=>$pos,
-        'goals_for'=>$g,'assists'=>$a,'goals_against'=>$gc,'yellow_cards'=>$ca,'red_cards'=>$cv,'rating'=>$rt,
-        'is_mvp'=>($mvpSelected==="pal_starter_$i")?1:0
-      ];
+      $palRows[] = ['role'=>'STARTER','sort_order'=>$i,'player_id'=>$pid,'position'=>$pos,'is_mvp'=>($mvpSelected==="pal_starter_$i")?1:0];
     }
   }
   for ($i=0;$i<$MAX_BENCH;$i++) {
     $pid = to_int(postv("pal_pid_bench_$i"), 0);
     $pos = postv("pal_pos_bench_$i");
-
-    $g  = to_int(postv("pal_g_bench_$i"), 0);
-    $a  = to_int(postv("pal_a_bench_$i"), 0);
-    $gc = to_int(postv("pal_og_bench_$i"), 0); // GC = gols contra (own goals)
-    $ca = to_int(postv("pal_y_bench_$i"), 0);
-    $cv = to_int(postv("pal_r_bench_$i"), 0);
-    $rt = to_float(postv("pal_rating_bench_$i"), 0.0);
-
     if ($pid>0 && $pos!=='') {
-      $palRows[] = [
-        'role'=>'BENCH','sort_order'=>$i,'player_id'=>$pid,'position'=>$pos,
-        'goals_for'=>$g,'assists'=>$a,'goals_against'=>$gc,'yellow_cards'=>$ca,'red_cards'=>$cv,'rating'=>$rt,
-        'is_mvp'=>($mvpSelected==="pal_bench_$i")?1:0
-      ];
+      $palRows[] = ['role'=>'BENCH','sort_order'=>$i,'player_id'=>$pid,'position'=>$pos,'is_mvp'=>($mvpSelected==="pal_bench_$i")?1:0];
     }
   }
 
   for ($i=0;$i<$MAX_STARTERS;$i++) {
     $name = postv("opp_name_starter_$i");
     $pos  = postv("opp_pos_starter_$i");
-
-    $g  = to_int(postv("opp_g_starter_$i"), 0);
-    $a  = to_int(postv("opp_a_starter_$i"), 0);
-    $gc = to_int(postv("opp_og_starter_$i"), 0); // GC = gols contra (own goals)
-    $ca = to_int(postv("opp_y_starter_$i"), 0);
-    $cv = to_int(postv("opp_r_starter_$i"), 0);
-    $rt = to_float(postv("opp_rating_starter_$i"), 0.0);
-
     if ($name!=='' && $pos!=='') {
-      $oppRows[] = [
-        'role'=>'STARTER','sort_order'=>$i,'name'=>$name,'position'=>$pos,
-        'goals_for'=>$g,'assists'=>$a,'goals_against'=>$gc,'yellow_cards'=>$ca,'red_cards'=>$cv,'rating'=>$rt,
-        'is_mvp'=>($mvpSelected==="opp_starter_$i")?1:0
-      ];
+      $oppRows[] = ['role'=>'STARTER','sort_order'=>$i,'name'=>$name,'position'=>$pos,'is_mvp'=>($mvpSelected==="opp_starter_$i")?1:0];
     }
   }
   for ($i=0;$i<$MAX_BENCH;$i++) {
     $name = postv("opp_name_bench_$i");
     $pos  = postv("opp_pos_bench_$i");
-
-    $g  = to_int(postv("opp_g_bench_$i"), 0);
-    $a  = to_int(postv("opp_a_bench_$i"), 0);
-    $gc = to_int(postv("opp_og_bench_$i"), 0); // GC = gols contra (own goals)
-    $ca = to_int(postv("opp_y_bench_$i"), 0);
-    $cv = to_int(postv("opp_r_bench_$i"), 0);
-    $rt = to_float(postv("opp_rating_bench_$i"), 0.0);
-
     if ($name!=='' && $pos!=='') {
-      $oppRows[] = [
-        'role'=>'BENCH','sort_order'=>$i,'name'=>$name,'position'=>$pos,
-        'goals_for'=>$g,'assists'=>$a,'goals_against'=>$gc,'yellow_cards'=>$ca,'red_cards'=>$cv,'rating'=>$rt,
-        'is_mvp'=>($mvpSelected==="opp_bench_$i")?1:0
-      ];
+      $oppRows[] = ['role'=>'BENCH','sort_order'=>$i,'name'=>$name,'position'=>$pos,'is_mvp'=>($mvpSelected==="opp_bench_$i")?1:0];
     }
   }
 
@@ -522,84 +389,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     $seen[$pid]=true;
   }
 
-  // Substituições (até 5 por time)
-  $subsPal = [];
-  $subsOpp = [];
-
-  // Palmeiras: OUT apenas titulares, IN apenas reservas
-  $palStarters = [];
-  $palBench    = [];
-  for ($i=0;$i<$MAX_STARTERS;$i++) {
-    $pid = to_int(postv("pal_pid_starter_$i"), 0);
-    if ($pid > 0) $palStarters[$pid] = true;
-  }
-  for ($i=0;$i<$MAX_BENCH;$i++) {
-    $pid = to_int(postv("pal_pid_bench_$i"), 0);
-    if ($pid > 0) $palBench[$pid] = true;
-  }
-
-  for ($i=0; $i<5; $i++) {
-    $minRaw = trim(postv("pal_sub_min_$i"));
-    $outId  = to_int(postv("pal_sub_out_$i"), 0);
-    $inId   = to_int(postv("pal_sub_in_$i"), 0);
-
-    if ($minRaw === '' && $outId === 0 && $inId === 0) continue; // linha vazia
-    if ($outId === 0 || $inId === 0) redirect('?page=create_match&err=subs_incomplete');
-    if ($outId === $inId) redirect('?page=create_match&err=subs_same');
-
-    if (!isset($palStarters[$outId])) redirect('?page=create_match&err=subs_out_not_starter');
-    if (!isset($palBench[$inId]))     redirect('?page=create_match&err=subs_in_not_bench');
-
-    $subsPal[] = [
-      'minute' => ($minRaw === '' ? null : (int)$minRaw),
-      'out'    => $outId,
-      'in'     => $inId,
-      'sort'   => $i,
-    ];
-  }
-
-  // Adversário: OUT apenas titulares (nome), IN apenas reservas (nome)
-  $oppStarters = [];
-  $oppBench    = [];
-  for ($i=0;$i<$MAX_STARTERS;$i++) {
-    $nm = trim(postv("opp_name_starter_$i"));
-    if ($nm !== '') $oppStarters[strtolower($nm)] = $nm;
-  }
-  for ($i=0;$i<$MAX_BENCH;$i++) {
-    $nm = trim(postv("opp_name_bench_$i"));
-    if ($nm !== '') $oppBench[strtolower($nm)] = $nm;
-  }
-
-  for ($i=0; $i<5; $i++) {
-    $minRaw = trim(postv("opp_sub_min_$i"));
-    $outNm  = trim(postv("opp_sub_out_$i"));
-    $inNm   = trim(postv("opp_sub_in_$i"));
-
-    if ($minRaw === '' && $outNm === '' && $inNm === '') continue;
-    if ($outNm === '' || $inNm === '') redirect('?page=create_match&err=subs_incomplete');
-    if (strcasecmp($outNm, $inNm) === 0) redirect('?page=create_match&err=subs_same');
-
-    $kOut = strtolower($outNm);
-    $kIn  = strtolower($inNm);
-    if (!isset($oppStarters[$kOut])) redirect('?page=create_match&err=subs_out_not_starter');
-    if (!isset($oppBench[$kIn]))     redirect('?page=create_match&err=subs_in_not_bench');
-
-    $subsOpp[] = [
-      'minute' => ($minRaw === '' ? null : (int)$minRaw),
-      'out_name' => $oppStarters[$kOut],
-      'in_name'  => $oppBench[$kIn],
-      'sort'   => $i,
-    ];
-  }
-
   // Schema tables
   $matchesInfo = table_info($pdo, 'matches');
   $matchPlayersInfo = table_info($pdo, 'match_players');
   $oppPlayersInfo   = table_info($pdo, 'opponent_players');
-
-  $hasPalStats      = table_exists($pdo, 'match_player_stats');
-  $palStatsInfo     = $hasPalStats ? table_info($pdo, 'match_player_stats') : [];
-
   $hasOppStats      = table_exists($pdo, 'opponent_match_player_stats');
   $oppStatsInfo     = $hasOppStats ? table_info($pdo, 'opponent_match_player_stats') : [];
 
@@ -609,20 +402,35 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
   $colHomeScore = pick_col($matchesInfo, ['home_score','home_goals']);
   $colAwayScore = pick_col($matchesInfo, ['away_score','away_goals']);
 
-  if (!$colHome || !$colAway) redirect('?page=create_match&err=exception');
+  if (!$colHome || !$colAway) {
+    pm_log('ERROR', 'matches sem colunas home/away');
+    redirect('?page=create_match&err=exception');
+  }
+
+  // valida match_players mínimo
+  foreach (['match_id','club_name','player_id','opponent_player_id','role','position','sort_order','entered','player_type'] as $need) {
+    if (!isset($matchPlayersInfo[$need])) {
+      pm_log('ERROR', "match_players sem coluna: $need");
+      redirect('?page=create_match&err=exception');
+    }
+  }
+
+  // valida opponent_players mínimo
+  foreach (['club_name','name','is_active','primary_position'] as $need) {
+    if (!isset($oppPlayersInfo[$need])) {
+      pm_log('ERROR', "opponent_players sem coluna: $need");
+      redirect('?page=create_match&err=exception');
+    }
+  }
 
   try {
     $pdo->beginTransaction();
 
-    // Monta matchData com o que existir no schema (mantém compatibilidade)
+    // INSERT matches com colunas existentes
     $matchData = [];
-
     if (isset($matchesInfo['season'])) $matchData['season'] = $season;
     if (isset($matchesInfo['competition'])) $matchData['competition'] = $competition;
-
     if (isset($matchesInfo['match_date'])) $matchData['match_date'] = $date;
-    elseif (isset($matchesInfo['date'])) $matchData['date'] = $date;
-
     if (isset($matchesInfo['match_time'])) $matchData['match_time'] = $match_time;
     if (isset($matchesInfo['phase'])) $matchData['phase'] = $phase;
     if (isset($matchesInfo['round'])) $matchData['round'] = $round;
@@ -658,50 +466,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     // Palmeiras roster
     foreach ($palRows as $r) {
       $insMatchPlayers->execute([$matchId, $club, (int)$r['player_id'], null, $r['role'], $r['position'], (int)$r['sort_order'], $palType]);
-
-      // match_player_stats (criar linha default)
-      if ($hasPalStats && isset($palStatsInfo['match_id']) && isset($palStatsInfo['player_id'])) {
-
-        $data = [
-          'match_id'  => $matchId,
-          'player_id' => (int)$r['player_id'],
-        ];
-
-        if (isset($palStatsInfo['club_name'])) $data['club_name'] = $club;
-
-        // valores vindos do formulário (GC = gols contra do jogador)
-        $gf = (int)($r['goals_for'] ?? 0);
-        $ga = (int)($r['goals_against'] ?? 0);
-        $as = (int)($r['assists'] ?? 0);
-        $yc = (int)($r['yellow_cards'] ?? 0);
-        $rc = (int)($r['red_cards'] ?? 0);
-        $rt = (float)($r['rating'] ?? 0.0);
-        $motm = (int)($r['is_mvp'] ?? 0);
-
-        if (isset($palStatsInfo['goals_for']))     $data['goals_for'] = $gf;
-        if (isset($palStatsInfo['goals_against'])) $data['goals_against'] = $ga;
-        if (isset($palStatsInfo['assists']))       $data['assists'] = $as;
-        if (isset($palStatsInfo['yellow_cards']))  $data['yellow_cards'] = $yc;
-        if (isset($palStatsInfo['red_cards']))     $data['red_cards'] = $rc;
-        if (isset($palStatsInfo['rating']))        $data['rating'] = $rt;   // NOT NULL em alguns schemas
-        if (isset($palStatsInfo['motm']))          $data['motm'] = $motm;
-
-        // preencher NOT NULL sem default (fallback seguro)
-        foreach ($palStatsInfo as $col => $meta) {
-          if ($col === 'id') continue;
-          if ((int)$meta['notnull'] === 1 && !array_key_exists($col, $data)) {
-            if ($meta['dflt'] !== null) continue;
-            $t = strtoupper((string)$meta['type']);
-            if (str_contains($t, 'INT')) $data[$col] = 0;
-            else $data[$col] = '';
-          }
-        }
-
-        $cols = array_keys($data);
-        $ph   = array_fill(0, count($cols), '?');
-        $pdo->prepare("INSERT INTO match_player_stats(".implode(',', $cols).") VALUES(".implode(',', $ph).")")
-            ->execute(array_values($data));
-      }
     }
 
     // Adversário roster (+ opponent_players)
@@ -730,34 +494,30 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         // ✅ seu erro: club_name é NOT NULL
         if (isset($oppStatsInfo['club_name'])) $data['club_name'] = $oppClub;
 
-        // valores vindos do formulário (GC = gols contra do jogador)
-        $gf = (int)($r['goals_for'] ?? 0);
-        $ga = (int)($r['goals_against'] ?? 0);
-        $as = (int)($r['assists'] ?? 0);
-        $yc = (int)($r['yellow_cards'] ?? 0);
-        $rc = (int)($r['red_cards'] ?? 0);
-        $rt = (float)($r['rating'] ?? 0.0);
-        $motm = (int)($r['is_mvp'] ?? 0);
-
-        if (isset($oppStatsInfo['goals_for']))     $data['goals_for'] = $gf;
-        if (isset($oppStatsInfo['goals_against'])) $data['goals_against'] = $ga;
-        if (isset($oppStatsInfo['assists']))       $data['assists'] = $as;
-        if (isset($oppStatsInfo['yellow_cards']))  $data['yellow_cards'] = $yc;
-        if (isset($oppStatsInfo['red_cards']))     $data['red_cards'] = $rc;
-        if (isset($oppStatsInfo['rating']))        $data['rating'] = $rt;   // NOT NULL em alguns schemas
-        if (isset($oppStatsInfo['motm']))          $data['motm'] = $motm;
-
         // campos comuns que podem existir / ser NOT NULL
         if (isset($oppStatsInfo['role'])) $data['role'] = $r['role'];
         if (isset($oppStatsInfo['position'])) $data['position'] = $r['position'];
         if (isset($oppStatsInfo['sort_order'])) $data['sort_order'] = (int)$r['sort_order'];
         if (isset($oppStatsInfo['entered'])) $data['entered'] = 1;
+        if (isset($oppStatsInfo['player_type'])) $data['player_type'] = $oppType;
 
-        // preencher NOT NULL sem default (fallback seguro)
+        // zera stats se existirem
+        foreach (['goals','assists','own_goals','yellow_cards','red_cards','rating','is_mvp'] as $k) {
+          if (isset($oppStatsInfo[$k])) $data[$k] = ($k === 'rating') ? 0.0 : 0;
+        }
+
+        // timestamps se existirem
+        if (isset($oppStatsInfo['created_at'])) $data['created_at'] = $now;
+        if (isset($oppStatsInfo['updated_at'])) $data['updated_at'] = $now;
+
+        // last safety: garante NOT NULL sem default
         foreach ($oppStatsInfo as $col => $meta) {
           if ($col === 'id') continue;
           if ((int)$meta['notnull'] === 1 && !array_key_exists($col, $data)) {
+            // se tiver default, deixa o DB cuidar
             if ($meta['dflt'] !== null) continue;
+
+            // fallback seguro
             $t = strtoupper((string)$meta['type']);
             if (str_contains($t, 'INT')) $data[$col] = 0;
             else $data[$col] = '';
@@ -771,67 +531,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
       }
     }
 
-    // Substituições (persistência)
-    ensure_match_substitutions_table($pdo);
-    q($pdo, "DELETE FROM match_substitutions WHERE match_id=?", [$matchId]);
-
-    $insSub = $pdo->prepare("
-      INSERT INTO match_substitutions(
-        match_id, side, minute,
-        player_out_id, player_in_id,
-        opponent_out_id, opponent_in_id,
-        sort_order
-      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
-    ");
-
-    // Palmeiras (ids)
-    foreach ($subsPal as $s) {
-      $insSub->execute([
-        $matchId,
-        $palType,
-        $s['minute'],
-        (int)$s['out'],
-        (int)$s['in'],
-        null,
-        null,
-        (int)$s['sort'],
-      ]);
-    }
-
-    // Mapa nome->id do adversário (já criado/garantido acima)
-    $oppIdByName = [];
-    $oppRowsAll = q($pdo, "SELECT id, name FROM opponent_players WHERE club_name=? COLLATE NOCASE", [$oppClub])->fetchAll(PDO::FETCH_ASSOC) ?: [];
-    foreach ($oppRowsAll as $o) {
-      $nm = strtolower(trim((string)($o['name'] ?? '')));
-      if ($nm !== '') $oppIdByName[$nm] = (int)($o['id'] ?? 0);
-    }
-
-    foreach ($subsOpp as $s) {
-      $outKey = strtolower(trim((string)$s['out_name']));
-      $inKey  = strtolower(trim((string)$s['in_name']));
-      $outId  = (int)($oppIdByName[$outKey] ?? 0);
-      $inId   = (int)($oppIdByName[$inKey] ?? 0);
-
-      if ($outId <= 0 || $inId <= 0) {
-        // fallback: tenta resolver na hora
-        $selOpp->execute([$oppClub, (string)$s['out_name']]);
-        $outId = (int)($selOpp->fetchColumn() ?: 0);
-        $selOpp->execute([$oppClub, (string)$s['in_name']]);
-        $inId  = (int)($selOpp->fetchColumn() ?: 0);
-      }
-
-      $insSub->execute([
-        $matchId,
-        $oppType,
-        $s['minute'],
-        null,
-        null,
-        $outId ?: null,
-        $inId ?: null,
-        (int)$s['sort'],
-      ]);
-    }
-
     $pdo->commit();
     redirect('/?page=match&id='.$matchId);
 
@@ -842,16 +541,41 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
   }
 }
 
+/* =========================================================
+   UI
+   ========================================================= */
+
 RENDER_PAGE:
 
-render_header('Criar Partida');
+render_header('Cadastrar partida');
 
-if ($err !== '') {
-  echo '<div class="alert alert-danger card-soft">'.h($err).'</div>';
+// adversário no título
+$homeName = fval('home');
+$awayName = fval('away');
+$oppTitle = 'Adversário';
+if ($homeName !== '' && $awayName !== '') {
+  if (strcasecmp($homeName, $club) === 0) $oppTitle = $awayName;
+  elseif (strcasecmp($awayName, $club) === 0) $oppTitle = $homeName;
 }
 
 if ($msg === 'tpl') {
-  echo '<div class="alert alert-success card-soft">Template aplicado.</div>';
+  echo '<div class="alert alert-success card-soft">Template aplicado na escalação do '.h($club).'. Você pode editar antes de salvar.</div>';
+}
+
+if ($err === 'invalid') {
+  echo '<div class="alert alert-danger card-soft">Preencha os campos obrigatórios.</div>';
+} elseif ($err === 'season_mismatch') {
+  echo '<div class="alert alert-warning card-soft">A <b>DATA</b> deve estar no mesmo ano da <b>TEMPORADA</b>.</div>';
+} elseif ($err === 'palmeiras_only') {
+  echo '<div class="alert alert-warning card-soft">Este sistema aceita apenas jogos onde o <b>'.h($club).'</b> participa.</div>';
+} elseif ($err === 'roster_required') {
+  echo '<div class="alert alert-warning card-soft">Informe ao menos <b>1 atleta do '.h($club).'</b> e <b>1 do adversário</b>.</div>';
+} elseif ($err === 'dup_player') {
+  echo '<div class="alert alert-warning card-soft">Você selecionou o <b>mesmo jogador do '.h($club).'</b> mais de uma vez.</div>';
+} elseif ($err === 'tpl') {
+  echo '<div class="alert alert-danger card-soft">Não foi possível aplicar o template.</div>';
+} elseif ($err === 'exception') {
+  echo '<div class="alert alert-danger card-soft">Falha ao cadastrar. Verifique o log em <code>D:\\Projetos\\palmeiras_manager\\logs\\app.log</code>.</div>';
 }
 
 $mvpSelected = postv('mvp');
@@ -923,12 +647,12 @@ echo '<div class="col-12 col-md-2">
 
 echo '<div class="col-12 col-md-3">
   <label class="form-label">Mandante</label>
-  <input class="form-control" name="home" value="'.h(fval('home',$club)).'" required>
+  <input class="form-control" name="home" value="'.h(fval('home')).'" required>
 </div>';
 
 echo '<div class="col-12 col-md-3">
   <label class="form-label">Visitante</label>
-  <input class="form-control" name="away" value="'.h(fval('away','ADVERSÁRIO')).'" required>
+  <input class="form-control" name="away" value="'.h(fval('away')).'" required>
 </div>';
 
 echo '<div class="col-6 col-md-1">
@@ -968,21 +692,13 @@ echo '</div>';
 
 render_table_create(true, 'starter', $MAX_STARTERS, $positions, $palPlayers, $mvpSelected);
 render_table_create(true, 'bench',   $MAX_BENCH,    $positions, $palPlayers, $mvpSelected);
-render_subs_block('pal', 'Substituições (até 5)');
-
 echo '</div></div>';
 
 // Adversário
-$homeVal = fval('home',$club);
-$awayVal = fval('away','ADVERSÁRIO');
-$oppTitle = (strcasecmp($homeVal, $club) === 0) ? $awayVal : $homeVal;
-
 echo '<div class="col-12 col-xl-6"><div class="card-soft p-3">';
 echo '<h5 class="mb-3">'.h($oppTitle).'</h5>';
 render_table_create(false, 'starter', $MAX_STARTERS, $positions, $palPlayers, $mvpSelected);
 render_table_create(false, 'bench',   $MAX_BENCH,    $positions, $palPlayers, $mvpSelected);
-render_subs_block('opp', 'Substituições (até 5)');
-
 echo '</div></div>';
 
 echo '</div>';
@@ -992,131 +708,5 @@ echo '<div class="text-end mt-3">
 </div>';
 
 echo '</form>';
-
-// Preenche as listas de substituições com base nos titulares/reservas (sem alterar o padrão visual)
-echo '<script>
-(function(){
-  function clearAndKeepEmpty(sel){
-    sel.innerHTML = "";
-    var o = document.createElement("option");
-    o.value = "";
-    o.textContent = "";
-    sel.appendChild(o);
-  }
-
-  function setOptions(sel, options){
-    var cur = sel.getAttribute("data-selected") || sel.value || "";
-    clearAndKeepEmpty(sel);
-    options.forEach(function(x){
-      var o = document.createElement("option");
-      o.value = x.value;
-      o.textContent = x.label;
-      sel.appendChild(o);
-    });
-
-    if(cur){
-      sel.value = cur;
-      if(!sel.value){
-        var curL = String(cur).toLowerCase();
-        for (var i=0;i<sel.options.length;i++){
-          if (String(sel.options[i].value).toLowerCase() === curL) { sel.value = sel.options[i].value; break; }
-        }
-      }
-    }
-  }
-
-  function uniqByKey(list, keyFn){
-    var seen = {};
-    var out = [];
-    list.forEach(function(x){
-      var k = keyFn(x);
-      if(seen[k]) return;
-      seen[k] = true;
-      out.push(x);
-    });
-    return out;
-  }
-
-  function buildFromSelect(names){
-    var out = [];
-    names.forEach(function(n){
-      var s = document.querySelector("select[name=\\"" + n + "\\"]");
-      if(!s) return;
-      var v = s.value;
-      if(!v || v === "0") return;
-      var label = (s.options[s.selectedIndex] ? s.options[s.selectedIndex].text : "").trim();
-      if(!label) return;
-      out.push({value: v, label: label});
-    });
-    return uniqByKey(out, function(x){ return String(x.value); });
-  }
-
-  function buildFromInputs(names){
-    var out = [];
-    names.forEach(function(n){
-      var i = document.querySelector("input[name=\\"" + n + "\\"]");
-      if(!i) return;
-      var v = (i.value || "").trim();
-      if(!v) return;
-      out.push({value: v, label: v});
-    });
-    return uniqByKey(out, function(x){ return String(x.value).toLowerCase(); });
-  }
-
-  function refresh(prefix){
-    var outOpts = [];
-    var inOpts  = [];
-
-    if(prefix === "pal"){
-      var starters = [];
-      var bench = [];
-      for (var i=0;i<11;i++) starters.push("pal_pid_starter_" + i);
-      for (var j=0;j<9;j++)  bench.push("pal_pid_bench_" + j);
-      outOpts = buildFromSelect(starters);
-      inOpts  = buildFromSelect(bench);
-    } else {
-      var starters2 = [];
-      var bench2 = [];
-      for (var i2=0;i2<11;i2++) starters2.push("opp_name_starter_" + i2);
-      for (var j2=0;j2<9;j2++)  bench2.push("opp_name_bench_" + j2);
-      outOpts = buildFromInputs(starters2);
-      inOpts  = buildFromInputs(bench2);
-    }
-
-    document.querySelectorAll("select.sub-out[data-prefix=\\"" + prefix + "\\"]").forEach(function(sel){
-      setOptions(sel, outOpts);
-    });
-    document.querySelectorAll("select.sub-in[data-prefix=\\"" + prefix + "\\"]").forEach(function(sel){
-      setOptions(sel, inOpts);
-    });
-  }
-
-  function bind(){
-    // Palmeiras selects
-    for (var i=0;i<11;i++){
-      var s = document.querySelector("select[name=\\"pal_pid_starter_" + i + "\\"]");
-      if(s) s.addEventListener("change", function(){ refresh("pal"); });
-    }
-    for (var j=0;j<9;j++){
-      var b = document.querySelector("select[name=\\"pal_pid_bench_" + j + "\\"]");
-      if(b) b.addEventListener("change", function(){ refresh("pal"); });
-    }
-
-    // Adversário inputs
-    for (var i2=0;i2<11;i2++){
-      var is = document.querySelector("input[name=\\"opp_name_starter_" + i2 + "\\"]");
-      if(is) is.addEventListener("input", function(){ refresh("opp"); });
-    }
-    for (var j2=0;j2<9;j2++){
-      var ib = document.querySelector("input[name=\\"opp_name_bench_" + j2 + "\\"]");
-      if(ib) ib.addEventListener("input", function(){ refresh("opp"); });
-    }
-  }
-
-  refresh("pal");
-  refresh("opp");
-  bind();
-})();
-</script>';
 
 render_footer();
