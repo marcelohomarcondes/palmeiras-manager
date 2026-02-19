@@ -4,13 +4,15 @@ declare(strict_types=1);
 $pdo = db();
 
 /**
- * Opções fixas de posição (conforme requisito)
+ * Opções fixas de posição
  */
 $POSITIONS = ['GOL','ZAG','LD','LE','ALD','ALE','VOL','MC','ME','MD','MEI','PD','PE','SA','ATA'];
 
 /**
- * Helper: parse de string "PE, PD; MEI" -> ['PE','PD','MEI']
+ * Ordem customizada para ordenar por POS (GOL, ALE, LE, ZAG, LD, ALD, VOL, ME, MC, MD, MEI, PE, PD, SA, ATA)
  */
+$PRIMARY_POS_ORDER_CASE = "CASE UPPER(primary_position) WHEN 'GOL' THEN 1 WHEN 'ALE' THEN 2 WHEN 'LE' THEN 3 WHEN 'ZAG' THEN 4 WHEN 'LD' THEN 5 WHEN 'ALD' THEN 6 WHEN 'VOL' THEN 7 WHEN 'ME' THEN 8 WHEN 'MC' THEN 9 WHEN 'MD' THEN 10 WHEN 'MEI' THEN 11 WHEN 'PE' THEN 12 WHEN 'PD' THEN 13 WHEN 'SA' THEN 14 WHEN 'ATA' THEN 15 ELSE 999 END";
+
 function parse_positions(string $raw): array {
   $raw = trim($raw);
   if ($raw === '') return [];
@@ -21,15 +23,14 @@ function parse_positions(string $raw): array {
 }
 
 /**
- * (Segurança) cria tabelas se não existirem
- * - academy_players: elenco da base
- * - academy_dismissed: dispensados (apenas nomes para consulta futura)
+ * Tabelas (se não existirem)
+ * NOTE: mantive shirt_number no CREATE por compatibilidade com quem já criou antes,
+ * mas a página não usa mais número na BASE.
  */
 q($pdo, "
   CREATE TABLE IF NOT EXISTS academy_players (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
-    shirt_number INTEGER NULL,
     primary_position TEXT NOT NULL,
     secondary_positions TEXT NULL,
     is_active INTEGER NOT NULL DEFAULT 1,
@@ -59,7 +60,7 @@ if (isset($_GET['edit'])) {
 }
 
 /**
- * Delete (GET) - remove da base definitivamente (não vai para dispensados)
+ * Delete (GET) - remove da base definitivamente
  */
 if (isset($_GET['del'])) {
   q($pdo, "DELETE FROM academy_players WHERE id=? AND club_name = ? COLLATE NOCASE", [(int)$_GET['del'], app_club()]);
@@ -82,11 +83,7 @@ if (isset($_GET['dismiss'])) {
 /**
  * PROMOVER (POST - via modal)
  * - Nome vem preenchido
- * - Usuário preenche: número, posição primária, secundárias
- * Ação:
- *  1) Insere na tabela players
- *  2) Remove da academy_players
- *  3) Tenta inserir em transferências como "PROMOVIDO DA BASE" (se existir)
+ * - Usuário preenche: número (agora SIM), posição primária, secundárias
  */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['promote_submit'])) {
   $academyId = (int)($_POST['academy_id'] ?? 0);
@@ -101,17 +98,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['promote_submit'])) {
   $secArr = array_values(array_filter($secArr, fn($v) => in_array($v, $POSITIONS, true)));
   $sec = implode(',', $secArr);
 
-  // validações
   if ($academyId <= 0) {
     $err = 'Atleta inválido para promoção.';
   } elseif ($name === '') {
     $err = 'Informe o nome do atleta.';
+  } elseif ($shirt === null) {
+    $err = 'Informe o número de camisa para o elenco profissional.';
   } elseif (!in_array($prim, $POSITIONS, true)) {
     $err = 'Selecione uma posição primária válida.';
   }
 
   if ($err === '') {
-    // Confirma que existe na base e pertence ao clube
     $r = q($pdo, "SELECT * FROM academy_players WHERE id=? AND club_name = ? COLLATE NOCASE", [$academyId, app_club()])->fetch();
     if (!$r) {
       $err = 'Atleta não encontrado na base.';
@@ -125,18 +122,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['promote_submit'])) {
       // 2) Remove da base
       q($pdo, "DELETE FROM academy_players WHERE id=? AND club_name = ? COLLATE NOCASE", [$academyId, app_club()]);
 
-      // 3) Tenta registrar em Transferências como "PROMOVIDO DA BASE"
-      // (não quebra se tabela/colunas não existirem no seu schema)
+      // 3) Tenta registrar em Transferências como "PROMOVIDO DA BASE" (não quebra se schema diferente)
       try {
-        // Ajuste este INSERT se você já tiver um schema conhecido.
-        // A ideia é registrar um evento simples.
         q($pdo, "INSERT INTO transfers(player_name, transfer_type, club_name, created_at)
                  VALUES (?,?,?,datetime('now'))",
           [$name, 'PROMOVIDO DA BASE', app_club()]
         );
-      } catch (\Throwable $e) {
-        // ignora silenciosamente para manter compatibilidade
-      }
+      } catch (\Throwable $e) {}
 
       redirect('/?page=crias');
     }
@@ -144,14 +136,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['promote_submit'])) {
 }
 
 /**
- * Save (POST) - Cadastro/edição na BASE (academy_players)
+ * Save (POST) - Cadastro/edição na BASE (SEM número)
  */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['promote_submit'])) {
   $id = (int)($_POST['id'] ?? 0);
   $name = trim((string)($_POST['name'] ?? ''));
-
-  $shirt = ($_POST['shirt_number'] ?? '') === '' ? null : (int)$_POST['shirt_number'];
-
   $prim = trim((string)($_POST['primary_position'] ?? ''));
 
   $secArr = $_POST['secondary_positions'] ?? [];
@@ -172,7 +161,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['promote_submit'])) {
     $edit = [
       'id' => $id,
       'name' => $name,
-      'shirt_number' => $shirt,
       'primary_position' => $prim,
       'secondary_positions' => $sec,
       'is_active' => $active
@@ -180,14 +168,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['promote_submit'])) {
   } else {
     if ($id > 0) {
       q($pdo, "UPDATE academy_players
-              SET name=?, shirt_number=?, primary_position=?, secondary_positions=?, is_active=?, updated_at=datetime('now')
+              SET name=?, primary_position=?, secondary_positions=?, is_active=?, updated_at=datetime('now')
               WHERE id=? AND club_name = ? COLLATE NOCASE",
-        [$name, $shirt, $prim, $sec, $active, $id, app_club()]
+        [$name, $prim, $sec, $active, $id, app_club()]
       );
     } else {
-      q($pdo, "INSERT INTO academy_players(name, shirt_number, primary_position, secondary_positions, is_active, club_name)
-              VALUES (?,?,?,?,?,?)",
-        [$name, $shirt, $prim, $sec, $active, app_club()]
+      q($pdo, "INSERT INTO academy_players(name, primary_position, secondary_positions, is_active, club_name)
+              VALUES (?,?,?,?,?)",
+        [$name, $prim, $sec, $active, app_club()]
       );
     }
     redirect('/?page=crias');
@@ -195,14 +183,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['promote_submit'])) {
 }
 
 /**
- * SORT POR COLUNA (seleção em cada coluna)
+ * SORT POR COLUNA (sem coluna de número agora)
  */
 $allowedDirs = ['ASC', 'DESC'];
 $sortKey = null;
 $sortDir = null;
 
 $sortSelectMap = [
-  'sort_number'    => 'number',
   'sort_name'      => 'name',
   'sort_primary'   => 'primary',
   'sort_secondary' => 'secondary',
@@ -220,16 +207,16 @@ foreach ($sortSelectMap as $param => $key) {
   }
 }
 
-$defaultOrderBy = "is_active DESC, primary_position ASC, shirt_number ASC, name ASC";
+#$defaultOrderBy = "is_active DESC, primary_position ASC, name ASC";
+$defaultOrderBy = "is_active DESC, {$PRIMARY_POS_ORDER_CASE} ASC, name ASC";
+
 $orderBy = $defaultOrderBy;
 
 if ($sortKey !== null && $sortDir !== null) {
-  if ($sortKey === 'number') {
-    $orderBy = "shirt_number IS NULL ASC, shirt_number {$sortDir}, name ASC";
-  } elseif ($sortKey === 'name') {
+  if ($sortKey === 'name') {
     $orderBy = "name {$sortDir}";
   } elseif ($sortKey === 'primary') {
-    $orderBy = "primary_position {$sortDir}, name ASC";
+    $orderBy = "{$PRIMARY_POS_ORDER_CASE} {$sortDir}, name ASC";
   } elseif ($sortKey === 'secondary') {
     $orderBy = "secondary_positions {$sortDir}, name ASC";
   } elseif ($sortKey === 'status') {
@@ -271,7 +258,6 @@ if ($edit && isset($edit['id']) && (int)$edit['id'] > 0) {
 }
 
 echo '<div><label class="form-label">Nome</label><input class="form-control" name="name" required value="' . h($edit['name'] ?? '') . '"></div>';
-echo '<div><label class="form-label">Número</label><input class="form-control" type="number" name="shirt_number" value="' . h((string)($edit['shirt_number'] ?? '')) . '"></div>';
 
 $primVal = (string)($edit['primary_position'] ?? '');
 echo '<div>';
@@ -315,7 +301,7 @@ echo '</form>';
 
 echo '<div class="text-muted small mt-3">Dica: ao promover, o atleta sai da base e entra no elenco profissional.</div>';
 
-// Dispensados (área "vermelha")
+// Dispensados
 echo '<hr class="my-3">';
 echo '<div class="fw-bold mb-2">Dispensados da Base</div>';
 
@@ -332,17 +318,15 @@ if (!$dismissed) {
 echo '</div></div>';
 
 /**
- * COLUNA DIREITA: Lista + botões Editar/Excluir/Promover/Dispensar
+ * COLUNA DIREITA: Lista (sem coluna # agora) + botões
  */
 echo '<div class="col-lg-8"><div class="card card-soft p-3">';
 echo '<div class="d-flex justify-content-between align-items-center mb-2"><div class="fw-bold">Lista</div>';
 echo '<div class="text-muted small">Total: ' . count($rows) . '</div></div>';
 
 echo '<div class="table-responsive">';
-
 echo '<form method="get" id="sortFormAcademy">';
 echo '<input type="hidden" name="page" value="crias">';
-if (isset($_GET['edit'])) echo '<input type="hidden" name="edit" value="' . (int)$_GET['edit'] . '">';
 
 echo '<table class="table table-sm align-middle mb-0">';
 echo '<thead><tr>';
@@ -359,7 +343,6 @@ function sortSelect(string $name, ?string $activeKey, ?string $activeDir, string
          '</select>';
 }
 
-echo '<th>#' . sortSelect('sort_number', $sortKey, $sortDir, 'number') . '</th>';
 echo '<th>Atleta' . sortSelect('sort_name', $sortKey, $sortDir, 'name') . '</th>';
 echo '<th>Posição' . sortSelect('sort_primary', $sortKey, $sortDir, 'primary') . '</th>';
 echo '<th>Pos. Sec.' . sortSelect('sort_secondary', $sortKey, $sortDir, 'secondary') . '</th>';
@@ -373,26 +356,21 @@ foreach ($rows as $r) {
   $rname = (string)$r['name'];
 
   echo '<tr>';
-  echo '<td class="mono">' . h((string)($r['shirt_number'] ?? '')) . '</td>';
   echo '<td>' . h($rname) . '</td>';
   echo '<td>' . h((string)$r['primary_position']) . '</td>';
   echo '<td class="text-muted">' . h((string)$r['secondary_positions']) . '</td>';
   echo '<td>' . ((int)$r['is_active'] === 1 ? '<span class="badge text-bg-success">Ativo</span>' : '<span class="badge text-bg-secondary">Inativo</span>') . '</td>';
 
   echo '<td class="text-end">';
-
-  // Editar/Excluir (igual)
   echo '<a class="btn btn-sm btn-outline-primary" href="/?page=crias&edit=' . $rid . '">Editar</a> ';
   echo '<a class="btn btn-sm btn-outline-danger" href="/?page=crias&del=' . $rid . '" onclick="return confirm(\'Excluir atleta da base?\')">Excluir</a> ';
 
-  // Promover (abre modal)
   echo '<button type="button" class="btn btn-sm btn-outline-success js-promote"
               data-id="' . $rid . '"
               data-name="' . h($rname) . '">
           Promover
         </button> ';
 
-  // Dispensar
   echo '<a class="btn btn-sm btn-outline-warning" href="/?page=crias&dismiss=' . $rid . '" onclick="return confirm(\'Dispensar este atleta da base? Ele irá para a lista de dispensados.\')">Dispensar</a>';
 
   echo '</td>';
@@ -404,9 +382,7 @@ echo '</form>';
 echo '</div>';
 
 /**
- * MODAL PROMOVER (Bootstrap)
- * - Nome preenchido
- * - Usuário preenche: número, primária, secundárias
+ * MODAL PROMOVER (continua com Número, pois agora vira profissional)
  */
 echo '
 <div class="modal fade" id="promoteModal" tabindex="-1" aria-hidden="true">
@@ -471,9 +447,6 @@ echo '        </div>
 </div>
 ';
 
-/**
- * JS: sort por coluna (igual ao players.php) + abrir modal e preencher nome/id
- */
 echo '<script>
 (function () {
   // SORT
@@ -503,7 +476,6 @@ echo '<script>
   function clearPromoteForm() {
     numEl.value = "";
     primEl.value = "";
-    // limpa checkboxes
     var cbs = modalEl.querySelectorAll("input[type=checkbox][name=\'promote_secondary_positions[]\']");
     cbs.forEach(function(cb){ cb.checked = false; });
   }
@@ -521,7 +493,6 @@ echo '<script>
       var m = bootstrap.Modal.getOrCreateInstance(modalEl);
       m.show();
 
-      // foca no número
       setTimeout(function(){ numEl.focus(); }, 150);
     });
   });
@@ -529,7 +500,6 @@ echo '<script>
 </script>';
 
 echo '</div></div>'; // col direita
-
 echo '</div>'; // row
 
 render_footer();

@@ -270,7 +270,7 @@ foreach ($competitions as $c) {
   echo '<div class="fw-semibold">' . h($c) . '</div>';
   echo '<span class="badge text-bg-success">x' . (int)$count . '</span>';
   echo '</div>';
-  echo '<div class="small text-muted trophy-years">Anos: ' . h($yearsText) . '</div>';
+  echo '<div class="small text-muted trophy-years">Conquistas: ' . h($yearsText) . '</div>';
   echo '</div>';
   echo '</div>';
   echo '</div>';
@@ -292,7 +292,7 @@ foreach ($competitions as $c) {
   echo '          </div>';
   echo '        </div>';
 
-  echo '        <div class="text-muted small mb-1">Anos conquistados</div>';
+  echo '        <div class="text-muted small mb-1">Conquistas</div>';
   if (!$years) {
     echo '        <div>—</div>';
   } else {

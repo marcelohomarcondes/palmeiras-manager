@@ -1,383 +1,239 @@
 <?php
 declare(strict_types=1);
 
-$pdo = db();
-$id = (int)($_GET['id'] ?? 0);
-if ($id <= 0) redirect('/?page=matches');
+require_once __DIR__ . '/../db.php';
 
-$match = q($pdo, "SELECT * FROM matches WHERE id = ?", [$id])->fetch(PDO::FETCH_ASSOC);
-if (!$match) exit('Partida não encontrada.');
+$pdo  = db();
+$club = app_club(); // ex: PALMEIRAS
 
-$PAL  = app_club();
-$HOME = (string)$match['home'];
-$AWAY = (string)$match['away'];
-
-$clubs = [$HOME => true, $AWAY => true];
-
-// Lista de atletas do Palmeiras (tabela players)
-$palPlayers = q($pdo, "
-  SELECT id, name, shirt_number, is_active
-  FROM players
-  WHERE club_name = ? COLLATE NOCASE
-  ORDER BY is_active DESC, name ASC
-", [$PAL])->fetchAll(PDO::FETCH_ASSOC);
-
-// Lista de atletas do adversário (tabela opponent_players)
-$oppPlayersByClub = [];
-$oppRows = q($pdo, "
-  SELECT id, club_name, name, is_active
-  FROM opponent_players
-  WHERE club_name IN (?, ?) COLLATE NOCASE
-  ORDER BY is_active DESC, name ASC
-", [$HOME, $AWAY])->fetchAll(PDO::FETCH_ASSOC);
-foreach ($oppRows as $r) {
-  $oppPlayersByClub[$r['club_name']][] = $r;
+if (!function_exists('redirect')) {
+  function redirect(string $url): void { header('Location: '.$url); exit; }
 }
 
-// Match players + nomes (Palmeiras ou adversário)
-$mpRows = q($pdo, "
+if (!function_exists('table_exists')) {
+  function table_exists(PDO $pdo, string $table): bool {
+    $st = $pdo->prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1");
+    $st->execute([$table]);
+    return (bool)$st->fetchColumn();
+  }
+}
+
+$matchId = (int)($_GET['id'] ?? 0);
+if ($matchId <= 0) {
+  render_header('Partida');
+  echo '<div class="alert alert-danger card-soft">ID da partida inválido.</div>';
+  render_footer();
+  exit;
+}
+
+/* =========================================================
+   Carrega a partida
+   ========================================================= */
+
+$match = q($pdo, "SELECT * FROM matches WHERE id = ?", [$matchId])->fetch(PDO::FETCH_ASSOC);
+if (!$match) {
+  render_header('Partida');
+  echo '<div class="alert alert-danger card-soft">Partida não encontrada.</div>';
+  render_footer();
+  exit;
+}
+
+// compatibilidade: home/away ou home_team/away_team
+$home = (string)($match['home'] ?? ($match['home_team'] ?? ''));
+$away = (string)($match['away'] ?? ($match['away_team'] ?? ''));
+
+/* =========================================================
+   Carrega escalações (JOIN em players e opponent_players)
+   ========================================================= */
+
+$rows = q($pdo, "
   SELECT
-    mp.*,
-    COALESCE(p.name, op.name) AS player_name
+    mp.player_type,
+    mp.club_name,
+    mp.role,
+    mp.sort_order,
+    mp.player_id,
+    mp.opponent_player_id,
+    mp.position,
+
+    p.name AS player_name,
+    p.shirt_number AS shirt_number,
+
+    op.name AS opponent_name
+
   FROM match_players mp
   LEFT JOIN players p ON p.id = mp.player_id
   LEFT JOIN opponent_players op ON op.id = mp.opponent_player_id
   WHERE mp.match_id = ?
-  ORDER BY mp.club_name,
-    CASE mp.role WHEN 'STARTER' THEN 0 ELSE 1 END,
-    mp.sort_order
-", [$id])->fetchAll(PDO::FETCH_ASSOC);
+  ORDER BY mp.player_type, mp.role, mp.sort_order
+", [$matchId])->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-// ===== Stats (Palmeiras x adversário) =====
-// Palmeiras: match_player_stats (player_id)
-$palStatsRows = q($pdo, "
-  SELECT *
-  FROM match_player_stats
-  WHERE match_id = ?
-", [$id])->fetchAll(PDO::FETCH_ASSOC);
+// separa HOME/AWAY
+$homeStarters = [];
+$homeBench    = [];
+$awayStarters = [];
+$awayBench    = [];
 
-// Adversário: opponent_match_player_stats (opponent_player_id)
-$oppStatsRows = q($pdo, "
-  SELECT *
-  FROM opponent_match_player_stats
-  WHERE match_id = ?
-", [$id])->fetchAll(PDO::FETCH_ASSOC);
+foreach ($rows as $r) {
+  $type = strtoupper(trim((string)($r['player_type'] ?? '')));
+  $role = strtoupper(trim((string)($r['role'] ?? '')));
 
-$statsMap = [];
-foreach ($palStatsRows as $s) {
-  $pid = (int)($s['player_id'] ?? 0);
-  if ($pid <= 0) continue;
-  $key = (string)$s['club_name'] . '#P' . $pid;
-  $statsMap[$key] = $s;
-}
-foreach ($oppStatsRows as $s) {
-  $opid = (int)($s['opponent_player_id'] ?? 0);
-  if ($opid <= 0) continue;
-  $key = (string)$s['club_name'] . '#O' . $opid;
-  $statsMap[$key] = $s;
+  if ($type === 'HOME' && $role === 'STARTER') $homeStarters[] = $r;
+  if ($type === 'HOME' && $role === 'BENCH')   $homeBench[]    = $r;
+  if ($type === 'AWAY' && $role === 'STARTER') $awayStarters[] = $r;
+  if ($type === 'AWAY' && $role === 'BENCH')   $awayBench[]    = $r;
 }
 
-$lineup = [
-  $HOME => ['starter'=>[], 'bench'=>[]],
-  $AWAY => ['starter'=>[], 'bench'=>[]]
-];
+/* =========================================================
+   Render helpers
+   ========================================================= */
 
-foreach ($mpRows as $r) {
-  $club = (string)$r['club_name'];
-  $role = strtolower((string)$r['role']);
-  if (!isset($lineup[$club])) continue;
+function render_lineup_table(array $rows): void {
+  echo '<div class="table-responsive">';
+  echo '<table class="table table-dark table-sm align-middle mb-0">';
+  echo '<thead><tr class="text-center">
+    <th style="width:80px;">POS</th>
+    <th>Atleta</th>
+    <th style="width:55px;">G</th>
+    <th style="width:55px;">A</th>
+    <th style="width:60px;">GC</th>
+    <th style="width:60px;">CA</th>
+    <th style="width:60px;">CV</th>
+    <th style="width:70px;">Nota</th>
+    <th style="width:60px;">MVP</th>
+  </tr></thead><tbody>';
 
-  $pid  = (int)($r['player_id'] ?? 0);
-  $opid = (int)($r['opponent_player_id'] ?? 0);
+  // Mostra exatamente o que está no DB (sem inventar)
+  foreach ($rows as $r) {
+    $pos = (string)($r['position'] ?? '');
 
-  $key = $club . '#' . ($opid > 0 ? ('O'.$opid) : ('P'.$pid));
-  $st = $statsMap[$key] ?? [];
-
-  $lineup[$club][$role][] = [
-    'player_id' => $pid,
-    'opponent_player_id' => $opid,
-    'position' => $r['position'] ?? '',
-    'goals_for' => $st['goals_for'] ?? 0,
-    'assists' => $st['assists'] ?? 0,
-    'goals_against' => $st['goals_against'] ?? 0,
-    'yellow_cards' => $st['yellow_cards'] ?? 0,
-    'red_cards' => $st['red_cards'] ?? 0,
-    'rating' => $st['rating'] ?? '',
-    'motm' => $st['motm'] ?? 0,
-  ];
-}
-
-foreach ([$HOME, $AWAY] as $club) {
-  $lineup[$club]['starter'] = array_slice($lineup[$club]['starter'], 0, 11);
-  $lineup[$club]['bench']   = array_slice($lineup[$club]['bench'], 0, 9);
-}
-
-function ensure_placeholders(&$clubData) : void {
-  while (count($clubData['starter']) < 11) $clubData['starter'][] = [];
-  while (count($clubData['bench']) < 9)   $clubData['bench'][] = [];
-}
-
-ensure_placeholders($lineup[$HOME]);
-ensure_placeholders($lineup[$AWAY]);
-
-/* ================= SAVE ================= */
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-  $rows = $_POST['rows'] ?? [];
-
-  // Campo único (checkbox + JS) que representa qual linha é o MVP
-  $mvpRowRaw = $_POST['mvp_row'] ?? '';
-  if (is_array($mvpRowRaw)) $mvpRowRaw = $mvpRowRaw[0] ?? '';
-  $mvpRow = (string)$mvpRowRaw;
-
-  $pdo->beginTransaction();
-
-  try {
-    // Limpa e regrava o lineup/stats dessa partida
-    q($pdo, "DELETE FROM match_player_stats WHERE match_id = ?", [$id]);
-    q($pdo, "DELETE FROM opponent_match_player_stats WHERE match_id = ?", [$id]);
-    q($pdo, "DELETE FROM match_players WHERE match_id = ?", [$id]);
-
-    $insertMp = $pdo->prepare("
-      INSERT INTO match_players(
-        match_id, club_name, player_id, opponent_player_id,
-        role, position, sort_order, entered, player_type
-      )
-      VALUES(?,?,?,?,?,?,?,?,?)
-    ");
-
-    $insertPalSt = $pdo->prepare("
-      INSERT INTO match_player_stats(
-        match_id, club_name, player_id,
-        goals_for, goals_against, assists,
-        yellow_cards, red_cards, rating, motm
-      )
-      VALUES(?,?,?,?,?,?,?,?,?,?)
-    ");
-
-    $insertOppSt = $pdo->prepare("
-      INSERT INTO opponent_match_player_stats(
-        match_id, club_name, opponent_player_id,
-        goals_for, goals_against, assists,
-        yellow_cards, red_cards, rating, motm
-      )
-      VALUES(?,?,?,?,?,?,?,?,?,?)
-    ");
-
-    $count = [];
-    $sortOrder = 0;
-
-    foreach ($rows as $idx => $r) {
-      $club = (string)($r['club'] ?? '');
-      $role = (string)($r['role'] ?? '');
-      if (!isset($clubs[$club])) continue;
-      if ($role !== 'starter' && $role !== 'bench') continue;
-
-      if (!isset($count[$club])) $count[$club] = ['starter'=>0, 'bench'=>0];
-
-      $limit = ($role === 'starter') ? 11 : 9;
-      if ($count[$club][$role] >= $limit) continue;
-      $count[$club][$role]++;
-
-      $position = (string)($r['position'] ?? '');
-
-      $pid = null;
-      $opid = null;
-      $playerType = 'HOME';
-
-      $isPal = (strcasecmp($club, $PAL) === 0);
-
-      if ($isPal) {
-        $pid = (int)($r['player_id'] ?? 0);
-        if ($pid <= 0) continue;
-        $playerType = 'HOME';
-      } else {
-        $opid = (int)($r['opponent_player_id'] ?? 0);
-        if ($opid <= 0) continue;
-        $playerType = 'AWAY';
-      }
-
-      $insertMp->execute([
-        $id, $club, $pid, $opid,
-        strtoupper($role), $position, $sortOrder++, 0, $playerType
-      ]);
-
-      // Apenas 1 MVP por partida
-      $isMvp = ($mvpRow !== '' && (string)$idx === $mvpRow) ? 1 : 0;
-
-      if ($isPal) {
-        $insertPalSt->execute([
-          $id, $club, $pid,
-          (int)($r['goals_for'] ?? 0),
-          (int)($r['goals_against'] ?? 0),
-          (int)($r['assists'] ?? 0),
-          (int)($r['yellow_cards'] ?? 0),
-          (int)($r['red_cards'] ?? 0),
-          ($r['rating'] ?? null),
-          $isMvp
-        ]);
-      } else {
-        $insertOppSt->execute([
-          $id, $club, $opid,
-          (int)($r['goals_for'] ?? 0),
-          (int)($r['goals_against'] ?? 0),
-          (int)($r['assists'] ?? 0),
-          (int)($r['yellow_cards'] ?? 0),
-          (int)($r['red_cards'] ?? 0),
-          ($r['rating'] ?? null),
-          $isMvp
-        ]);
-      }
+    $name = '';
+    if (!empty($r['player_id'])) {
+      // jogador do seu elenco
+      $n = (string)($r['player_name'] ?? '');
+      $num = (string)($r['shirt_number'] ?? '');
+      $name = ($num !== '' ? ($num.' - '.$n) : $n);
+    } else {
+      // adversário
+      $name = (string)($r['opponent_name'] ?? '');
     }
+    if ($name === '') $name = '--';
 
-    $pdo->commit();
-    redirect('/?page=match&id='.$id);
-  } catch (Throwable $e) {
-    $pdo->rollBack();
-    throw $e;
+    // stats: por enquanto zerado (se você quiser, eu integro com suas tabelas de stats depois)
+    echo '<tr class="text-center">';
+    echo '<td>'.h($pos).'</td>';
+    echo '<td class="text-start">'.h($name).'</td>';
+    echo '<td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td></td>';
+    echo '</tr>';
   }
+
+  echo '</tbody></table></div>';
 }
 
-/* ================= UI ================= */
+/* =========================================================
+   Página
+   ========================================================= */
+
 render_header('Partida');
 
-echo '<style>
-table td, table th { vertical-align: middle; }
-table input[type="number"] { text-align: center; }
-</style>';
+echo '<div class="card-soft p-3 mb-3">';
+echo '<h5 class="mb-3">Dados do jogo</h5>';
 
-echo '<form method="post">';
+echo '<div class="row g-3">';
+
+echo '<div class="col-12 col-md-2">
+  <label class="form-label">Temporada</label>
+  <input class="form-control" value="'.h((string)($match['season'] ?? '')).'" disabled>
+</div>';
+
+echo '<div class="col-12 col-md-4">
+  <label class="form-label">Competição</label>
+  <input class="form-control" value="'.h((string)($match['competition'] ?? '')).'" disabled>
+</div>';
+
+echo '<div class="col-12 col-md-2">
+  <label class="form-label">Data</label>
+  <input class="form-control" value="'.h((string)($match['match_date'] ?? '')).'" disabled>
+</div>';
+
+echo '<div class="col-12 col-md-2">
+  <label class="form-label">Hora</label>
+  <input class="form-control" value="'.h((string)($match['match_time'] ?? '')).'" disabled>
+</div>';
+
+echo '<div class="col-12 col-md-2">
+  <label class="form-label">Clima</label>
+  <input class="form-control" value="'.h((string)($match['weather'] ?? '')).'" disabled>
+</div>';
+
+echo '<div class="col-12 col-md-3">
+  <label class="form-label">Fase</label>
+  <input class="form-control" value="'.h((string)($match['phase'] ?? '')).'" disabled>
+</div>';
+
+echo '<div class="col-12 col-md-2">
+  <label class="form-label">Rodada</label>
+  <input class="form-control" value="'.h((string)($match['round'] ?? '')).'" disabled>
+</div>';
+
+echo '<div class="col-12 col-md-3">
+  <label class="form-label">Estádio</label>
+  <input class="form-control" value="'.h((string)($match['stadium'] ?? '')).'" disabled>
+</div>';
+
+echo '<div class="col-12 col-md-2">
+  <label class="form-label">Árbitro</label>
+  <input class="form-control" value="'.h((string)($match['referee'] ?? '')).'" disabled>
+</div>';
+
+echo '<div class="col-12 col-md-2">
+  <label class="form-label">Uniforme</label>
+  <input class="form-control" value="'.h((string)($match['kit_used'] ?? '')).'" disabled>
+</div>';
+
+echo '<div class="col-12 col-md-3">
+  <label class="form-label">Mandante</label>
+  <input class="form-control" value="'.h($home).'" disabled>
+</div>';
+
+echo '<div class="col-12 col-md-3">
+  <label class="form-label">Visitante</label>
+  <input class="form-control" value="'.h($away).'" disabled>
+</div>';
+
+echo '<div class="col-6 col-md-1">
+  <label class="form-label">GF</label>
+  <input class="form-control text-center" value="'.h((string)($match['home_score'] ?? ($match['home_goals'] ?? ''))).'" disabled>
+</div>';
+
+echo '<div class="col-6 col-md-1">
+  <label class="form-label">GA</label>
+  <input class="form-control text-center" value="'.h((string)($match['away_score'] ?? ($match['away_goals'] ?? ''))).'" disabled>
+</div>';
+
+echo '</div>'; // row
+echo '</div>'; // card
+
 echo '<div class="row g-4">';
 
-function render_table(string $club, array $data, array $palPlayers, array $oppPlayersByClub, string $palClub) : void {
-  $isPal = (strcasecmp($club, $palClub) === 0);
+// HOME
+echo '<div class="col-12 col-xl-6"><div class="card-soft p-3">';
+echo '<h5 class="mb-2">'.h($home !== '' ? $home : 'Mandante').'</h5>';
+echo '<h6 class="mt-3">Titulares (11)</h6>';
+render_lineup_table($homeStarters);
+echo '<h6 class="mt-3">Reservas (9)</h6>';
+render_lineup_table($homeBench);
+echo '</div></div>';
 
-  echo '<div class="col-12 col-xl-6">';
-  echo '<div class="card-soft p-3">';
-  echo '<h5 class="mb-3">'.h($club).'</h5>';
+// AWAY
+echo '<div class="col-12 col-xl-6"><div class="card-soft p-3">';
+echo '<h5 class="mb-2">'.h($away !== '' ? $away : 'Visitante').'</h5>';
+echo '<h6 class="mt-3">Titulares (11)</h6>';
+render_lineup_table($awayStarters);
+echo '<h6 class="mt-3">Reservas (9)</h6>';
+render_lineup_table($awayBench);
+echo '</div></div>';
 
-  foreach (["starter" => "Titulares (11)", "bench" => "Reservas (9)"] as $type => $label) {
-
-    echo '<h6 class="mt-3">'.h($label).'</h6>';
-    echo '<table class="table table-dark table-sm">';
-    echo '<thead><tr>
-      <th style="width:70px;">POS</th>
-      <th>Atleta</th>
-      <th style="width:55px;" class="text-center">G</th>
-      <th style="width:55px;" class="text-center">A</th>
-      <th style="width:60px;" class="text-center">GC</th>
-      <th style="width:60px;" class="text-center">CA</th>
-      <th style="width:60px;" class="text-center">CV</th>
-      <th style="width:65px;" class="text-center">Nota</th>
-      <th style="width:60px;" class="text-center">MVP</th>
-    </tr></thead><tbody>';
-
-    foreach ($data[$type] as $i => $row) {
-
-      $idx = $club.'_'.$type.'_'.$i;
-      $motm = !empty($row['motm']) ? 'checked' : '';
-
-      echo '<tr>';
-
-      echo '<td>
-        <input class="form-control form-control-sm text-center px-1"
-          style="max-width:70px;"
-          name="rows['.h($idx).'][position]"
-          value="'.h($row['position'] ?? '').'">
-      </td>';
-
-      // Select de atleta
-      echo '<td>';
-      echo '<select class="form-select form-select-sm w-100" ';
-
-      if ($isPal) {
-        echo 'name="rows['.h($idx).'][player_id]">';
-        echo '<option value="0">--</option>';
-
-        $current = (int)($row['player_id'] ?? 0);
-        foreach ($palPlayers as $p) {
-          $sel = ((int)$p['id'] === $current) ? 'selected' : '';
-          $labelP = $p['name'];
-          if (!empty($p['shirt_number'])) $labelP = $p['shirt_number'].' - '.$labelP;
-          echo '<option value="'.(int)$p['id'].'" '.$sel.'>'.h($labelP).'</option>';
-        }
-      } else {
-        echo 'name="rows['.h($idx).'][opponent_player_id]">';
-        echo '<option value="0">--</option>';
-
-        $current = (int)($row['opponent_player_id'] ?? 0);
-        $opts = $oppPlayersByClub[$club] ?? [];
-        foreach ($opts as $p) {
-          $sel = ((int)$p['id'] === $current) ? 'selected' : '';
-          echo '<option value="'.(int)$p['id'].'" '.$sel.'>'.h($p['name']).'</option>';
-        }
-      }
-
-      echo '</select>';
-      echo '</td>';
-
-      $smallInput = 'class="form-control form-control-sm text-center px-1" style="max-width:60px;"';
-
-      echo '<td><input type="number" name="rows['.h($idx).'][goals_for]" value="'.h((string)($row['goals_for'] ?? 0)).'" '.$smallInput.'></td>';
-      echo '<td><input type="number" name="rows['.h($idx).'][assists]" value="'.h((string)($row['assists'] ?? 0)).'" '.$smallInput.'></td>';
-      echo '<td><input type="number" name="rows['.h($idx).'][goals_against]" value="'.h((string)($row['goals_against'] ?? 0)).'" '.$smallInput.'></td>';
-      echo '<td><input type="number" name="rows['.h($idx).'][yellow_cards]" value="'.h((string)($row['yellow_cards'] ?? 0)).'" '.$smallInput.'></td>';
-      echo '<td><input type="number" name="rows['.h($idx).'][red_cards]" value="'.h((string)($row['red_cards'] ?? 0)).'" '.$smallInput.'></td>';
-
-      echo '<td>
-        <input type="number" step="0.1" min="0" max="10"
-          name="rows['.h($idx).'][rating]"
-          value="'.h((string)($row['rating'] ?? '')).'"
-          class="form-control form-control-sm text-center px-1"
-          style="max-width:65px;">
-      </td>';
-
-      // MVP (apenas 1 por partida)
-      echo '<td class="text-center">
-        <input type="checkbox" class="mvp-checkbox" name="mvp_row" value="'.h($idx).'" '.$motm.'>
-      </td>';
-
-      echo '<input type="hidden" name="rows['.h($idx).'][club]" value="'.h($club).'">';
-      echo '<input type="hidden" name="rows['.h($idx).'][role]" value="'.h($type).'">';
-
-      echo '</tr>';
-    }
-
-    echo '</tbody></table>';
-  }
-
-  echo '</div></div>';
-}
-
-render_table($HOME, $lineup[$HOME], $palPlayers, $oppPlayersByClub, $PAL);
-render_table($AWAY, $lineup[$AWAY], $palPlayers, $oppPlayersByClub, $PAL);
-
-echo '</div>';
-echo '<div class="text-end mt-3">
-  <button class="btn btn-success">Salvar</button>
-</div>';
-echo '</form>';
+echo '</div>'; // row
 
 render_footer();
-
-echo <<<HTML
-<script>
-(function () {
-  const boxes = Array.from(document.querySelectorAll('.mvp-checkbox'));
-  if (!boxes.length) return;
-
-  // Se por algum motivo vierem várias marcadas (dados antigos), mantém só a primeira
-  const checked = boxes.filter(b => b.checked);
-  if (checked.length > 1) checked.slice(1).forEach(b => b.checked = false);
-
-  boxes.forEach(box => {
-    box.addEventListener('change', function () {
-      if (!this.checked) return; // permite deixar sem MVP se desmarcar
-
-      boxes.forEach(b => {
-        if (b !== this) b.checked = false;
-      });
-    });
-  });
-})();
-</script>
-HTML;

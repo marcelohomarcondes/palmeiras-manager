@@ -8,6 +8,11 @@ $pdo = db();
  */
 $POSITIONS = ['GOL','ZAG','LD','LE','ALD','ALE','VOL','MC','ME','MD','MEI','PD','PE','SA','ATA'];
 
+
+/**
+ * Ordem customizada para ordenar por POS (GOL, ALE, LE, ZAG, LD, ALD, VOL, ME, MC, MD, MEI, PE, PD, SA, ATA)
+ */
+$PRIMARY_POS_ORDER_CASE = "CASE UPPER(primary_position) WHEN 'GOL' THEN 1 WHEN 'ALE' THEN 2 WHEN 'LE' THEN 3 WHEN 'ZAG' THEN 4 WHEN 'LD' THEN 5 WHEN 'ALD' THEN 6 WHEN 'VOL' THEN 7 WHEN 'ME' THEN 8 WHEN 'MC' THEN 9 WHEN 'MD' THEN 10 WHEN 'MEI' THEN 11 WHEN 'PE' THEN 12 WHEN 'PD' THEN 13 WHEN 'SA' THEN 14 WHEN 'ATA' THEN 15 ELSE 999 END";
 /**
  * Helper: parse de string "PE, PD; MEI" -> ['PE','PD','MEI']
  */
@@ -126,7 +131,8 @@ foreach ($sortSelectMap as $param => $key) {
 }
 
 // ORDER BY padrão atual (quando não há sort selecionado)
-$defaultOrderBy = "is_active DESC, primary_position ASC, shirt_number ASC, name ASC";
+#$defaultOrderBy = "is_active DESC, primary_position ASC, shirt_number ASC, name ASC";
+$defaultOrderBy = "is_active DESC, {$PRIMARY_POS_ORDER_CASE} ASC, shirt_number ASC, name ASC";
 
 // Monta ORDER BY com base no sort selecionado (com tie-breakers estáveis)
 $orderBy = $defaultOrderBy;
@@ -138,7 +144,7 @@ if ($sortKey !== null && $sortDir !== null) {
   } elseif ($sortKey === 'name') {
     $orderBy = "name {$sortDir}";
   } elseif ($sortKey === 'primary') {
-    $orderBy = "primary_position {$sortDir}, name ASC";
+    $orderBy = "{$PRIMARY_POS_ORDER_CASE} {$sortDir}, name ASC";
   } elseif ($sortKey === 'secondary') {
     $orderBy = "secondary_positions {$sortDir}, name ASC";
   } elseif ($sortKey === 'status') {
