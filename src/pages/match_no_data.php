@@ -25,30 +25,6 @@ if (!function_exists('table_cols')) {
   }
 }
 
-
-// Helpers do bloco "Dados do jogo"
-if (!function_exists('fmtv')) {
-  function fmtv($v): string {
-    return ($v === null || $v === '') ? '-' : (string)$v;
-  }
-}
-if (!function_exists('fmt_date_br')) {
-  function fmt_date_br(string $raw): string {
-    $raw = trim($raw);
-    if ($raw === '') return '-';
-    $ts = strtotime($raw);
-    return ($ts !== false) ? date('d/m/Y', $ts) : $raw;
-  }
-}
-if (!function_exists('pick_first_key')) {
-  function pick_first_key(array $row, array $keys) {
-    foreach ($keys as $k) {
-      if (array_key_exists($k, $row) && $row[$k] !== null && $row[$k] !== '') return $row[$k];
-    }
-    return null;
-  }
-}
-
 function load_stats(PDO $pdo, int $matchId): array {
   $out = [
     'pal' => [], // player_id => stats
@@ -301,90 +277,6 @@ render_header('Partida');
 
 echo '<div class="text-end mb-3">';
 echo '  <a class="btn btn-sm btn-outline-warning" href="/?page=create_match&id='.(int)$matchId.'">Editar</a>';
-echo '</div>';
-
-
-// ============================
-// DADOS DO JOGO (LISTA VERTICAL)
-// ============================
-$season      = (string)($match['season'] ?? '');
-$competition = (string)($match['competition'] ?? '');
-$dateRaw     = (string)($match['match_date'] ?? ($match['date'] ?? ''));
-$timeRaw     = (string)($match['match_time'] ?? '');
-$weather     = (string)($match['weather'] ?? '');
-$phase       = (string)($match['phase'] ?? '');
-$round       = (string)($match['round'] ?? '');
-$stadium     = (string)($match['stadium'] ?? '');
-$referee     = (string)($match['referee'] ?? '');
-$kitUsed     = (string)($match['kit_used'] ?? '');
-
-$homeScore = pick_first_key($match, ['home_score','home_goals','goals_home','score_home','gf','gols_pro']);
-$awayScore = pick_first_key($match, ['away_score','away_goals','goals_away','score_away','ga','gols_contra']);
-
-$homeName = ($home !== '' ? $home : 'MANDANTE');
-$awayName = ($away !== '' ? $away : 'VISITANTE');
-
-$hs = ($homeScore !== null && $homeScore !== '') ? (string)$homeScore : '-';
-$as = ($awayScore !== null && $awayScore !== '') ? (string)$awayScore : '-';
-
-$dateFmt = ($dateRaw !== '') ? fmt_date_br($dateRaw) : '-';
-$timeFmt = ($timeRaw !== '') ? substr($timeRaw, 0, 5) : '-';
-
-echo '<div class="card-soft p-3 mb-3">';
-echo '  <h5 class="mb-3">Dados do Jogo</h5>';
-echo '  <ul class="list-group list-group-flush">';
-
-echo '    <li class="list-group-item bg-transparent text-light d-flex justify-content-between align-items-start">
-            <span class="text-muted">Temporada</span>
-            <strong>'.h(fmtv($season)).'</strong>
-          </li>';
-
-echo '    <li class="list-group-item bg-transparent text-light d-flex justify-content-between align-items-start">
-            <span class="text-muted">Competição</span>
-            <strong class="text-end" title="'.h(fmtv($competition)).'">'.h(fmtv($competition)).'</strong>
-          </li>';
-
-echo '    <li class="list-group-item bg-transparent text-light d-flex justify-content-between align-items-start">
-            <span class="text-muted">Data</span>
-            <strong>'.h($dateFmt).' '.($timeFmt !== '-' ? 'às '.h($timeFmt) : '').'</strong>
-          </li>';
-
-echo '    <li class="list-group-item bg-transparent text-light d-flex justify-content-between align-items-start">
-            <span class="text-muted">Fase</span>
-            <strong>'.h(fmtv($phase)).'</strong>
-          </li>';
-
-echo '    <li class="list-group-item bg-transparent text-light d-flex justify-content-between align-items-start">
-            <span class="text-muted">Rodada</span>
-            <strong>'.h(fmtv($round)).'</strong>
-          </li>';
-
-echo '    <li class="list-group-item bg-transparent text-light d-flex justify-content-between align-items-start">
-            <span class="text-muted">Estádio</span>
-            <strong class="text-end" title="'.h(fmtv($stadium)).'">'.h(fmtv($stadium)).'</strong>
-          </li>';
-
-echo '    <li class="list-group-item bg-transparent text-light d-flex justify-content-between align-items-start">
-            <span class="text-muted">Árbitro</span>
-            <strong class="text-end" title="'.h(fmtv($referee)).'">'.h(fmtv($referee)).'</strong>
-          </li>';
-
-echo '    <li class="list-group-item bg-transparent text-light d-flex justify-content-between align-items-start">
-            <span class="text-muted">Clima</span>
-            <strong>'.h(fmtv($weather)).'</strong>
-          </li>';
-
-echo '    <li class="list-group-item bg-transparent text-light d-flex justify-content-between align-items-start">
-            <span class="text-muted">Uniforme</span>
-            <strong>'.h(fmtv($kitUsed)).'</strong>
-          </li>';
-
-echo '    <li class="list-group-item bg-transparent text-light text-center" style="font-size:1.15rem;">
-            <span class="text-muted d-block mb-1">Placar</span>
-            <strong>'.h($homeName).' '.h($hs).' x '.h($as).' '.h($awayName).'</strong>
-          </li>';
-
-echo '  </ul>';
 echo '</div>';
 
 echo '<div class="row g-4">';
