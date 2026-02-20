@@ -1166,12 +1166,12 @@ echo '<div class="col-12 col-md-3">
 </div>';
 
 echo '<div class="col-6 col-md-1">
-  <label class="form-label">GF</label>
+  <label class="form-label">Gols Mandante</label>
   <input class="form-control text-center" type="number" name="home_score" value="'.h(fval('home_score')).'">
 </div>';
 
 echo '<div class="col-6 col-md-1">
-  <label class="form-label">GA</label>
+  <label class="form-label">Gols Visitante</label>
   <input class="form-control text-center" type="number" name="away_score" value="'.h(fval('away_score')).'">
 </div>';
 

@@ -40,7 +40,7 @@ echo '<div class="col-lg-7">';
 echo '<div class="card card-soft p-3">';
 echo '<div class="fw-bold mb-2">Últimas partidas</div>';
 
-$rows = q($pdo, "SELECT id, match_date, competition, home, away, home_score, away_score FROM matches ORDER BY match_date DESC, id DESC LIMIT 8")->fetchAll();
+$rows = q($pdo, "SELECT id, match_date, competition, home, away, home_score, away_score FROM matches ORDER BY match_date DESC, id DESC LIMIT 4")->fetchAll();
 if (!$rows) {
   echo '<div class="text-muted">Sem partidas cadastradas.</div>';
 } else {

@@ -1072,7 +1072,7 @@ echo '</div>';
 // Consecutivos
 echo '<div class="card-soft mb-3 p-3">';
 echo '  <h5 class="mb-2">Atletas com mais jogos consecutivos</h5>';
-render_table(['Jogador','Streak'], $topConsecutiveGames, ['player_name','streak'], 2);
+render_table_scroll(['Jogador','Streak'], $topConsecutiveGames, ['player_name','streak'], 2, 340);
 echo '  <div class="text-muted mt-2">Streak baseado em <code>entered=1</code> em partidas consecutivas dentro do filtro aplicado.</div>';
 echo '</div>';
 

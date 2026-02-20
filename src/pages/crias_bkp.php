@@ -240,25 +240,6 @@ $dismissed = q($pdo, "
 
 render_header('CRIAS DA ACADEMIA');
 
-/**
- * ✅ ÚNICA ALTERAÇÃO: tema/fundo do POP-UP de promoção (evita transparência/translúcido)
- * - não altera funções, layout, estrutura ou dados
- */
-echo '<style>
-  #promoteModal .modal-content{
-    background: var(--bs-body-bg) !important;
-    opacity: 1 !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-  }
-  #promoteModal .card-soft{
-    background: var(--bs-body-bg) !important;
-  }
-  .modal-backdrop.show{
-    opacity: .80 !important;
-  }
-</style>';
-
 echo '<div class="row g-3">';
 
 /**

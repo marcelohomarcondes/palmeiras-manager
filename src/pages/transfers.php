@@ -82,7 +82,26 @@ function cents_to_eur_label(?int $cents): string {
 }
 
 /** Carrega atletas do ELENCO (players) */
-$players = q($pdo, "SELECT id, name, shirt_number, is_active FROM players ORDER BY is_active DESC, name ASC")->fetchAll();
+//$players = q($pdo, "SELECT id, name, shirt_number, is_active FROM players ORDER BY is_active DESC, name ASC")->fetchAll();
+
+/**
+ * Carrega atletas do ELENCO (players)
+ *
+ * IMPORTANTE:
+ * No projeto, jogadores adversários podem acabar cadastrados na tabela `players` (ex.: nomes "p1", "p10" etc.).
+ * Para o dropdown desta tela (Transferências), devemos listar SOMENTE atletas do seu clube.
+ *
+ * Como a tabela `players` (confirmada no projeto) não possui coluna "club"/"team", usamos a regra prática:
+ * - Atletas do seu clube possuem `shirt_number` (camisa) > 0
+ * - Jogadores adversários normalmente não têm numeração associada
+ */
+$players = q(
+  $pdo,
+  "SELECT id, name, shirt_number, is_active
+     FROM players
+    WHERE shirt_number IS NOT NULL AND CAST(shirt_number AS INTEGER) > 0
+    ORDER BY is_active DESC, name ASC"
+)->fetchAll();
 $playerOptions = [];
 foreach ($players as $p) {
   $pid = (int)$p['id'];
