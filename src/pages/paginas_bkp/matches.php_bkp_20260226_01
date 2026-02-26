@@ -72,8 +72,6 @@ $rows = q($pdo, "
     id,
     season,
     competition,
-    phase,
-    round,
     match_date,
     home,
     away,
@@ -182,7 +180,7 @@ foreach ($seasonLabels as $seasonLabel) {
   echo '  <div class="season-head d-flex justify-content-between align-items-center table-active"';
   echo '       data-season="' . h($key) . '" role="button" tabindex="0" aria-expanded="true">';
   echo '    <div>';
-  echo '      <div class="season-title">Temporada ' . h((string)$seasonLabel) . '</div>';
+  echo '      <div class="season-title">Temporada ' . h($seasonLabel) . '</div>';
   echo '      <div class="season-sub">' . h((string)$count) . ' partida(s)</div>';
   echo '    </div>';
   echo '    <span class="season-caret" aria-hidden="true">▾</span>';
@@ -196,8 +194,6 @@ foreach ($seasonLabels as $seasonLabel) {
   echo '          <th>Data</th>';
   echo '          <th>Temporada</th>';
   echo '          <th>Campeonato</th>';
-  echo '          <th>Fase</th>';
-  echo '          <th>Rodada</th>';
   echo '          <th>Jogo</th>';
   echo '          <th>Placar</th>';
   echo '          <th class="text-end">Ações</th>';
@@ -208,8 +204,6 @@ foreach ($seasonLabels as $seasonLabel) {
     $id   = (int)$r['id'];
     $date = (string)$r['match_date'];
     $comp = (string)$r['competition'];
-    $phase = (string)($r['phase'] ?? '');
-    $round = (string)($r['round'] ?? '');
     $home = (string)$r['home'];
     $away = (string)$r['away'];
 
@@ -221,8 +215,6 @@ foreach ($seasonLabels as $seasonLabel) {
     echo '<td>' . h($date) . '</td>';
     echo '<td>' . h($seasonLabel) . '</td>';
     echo '<td>' . h($comp) . '</td>';
-    echo '<td>' . h($phase === '' ? '-' : $phase) . '</td>';
-    echo '<td>' . h($round === '' ? '-' : $round) . '</td>';
     echo '<td><b>' . h($home) . '</b> vs ' . h($away) . '</td>';
     echo '<td>' . h($score) . '</td>';
 
