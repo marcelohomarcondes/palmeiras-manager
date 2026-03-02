@@ -42,6 +42,10 @@ function is_promoted(string $type): bool {
   return trim($type) === 'PROMOVIDO DA BASE';
 }
 
+function normalize_digits(string $s): string {
+  return preg_replace('/\D+/', '', $s) ?? '';
+}
+
 /**
  * Converte string de entrada (somente dígitos / com separadores) para centavos.
  * Ex: "1.234,56" -> 123456
@@ -77,23 +81,8 @@ function cents_to_eur_label(?int $cents): string {
   return '€ ' . number_format($v, 2, ',', '.');
 }
 
-/**
- * Exibição da tabela: dd/mm/aaaa
- * (mantém o armazenamento/filtros em YYYY-MM-DD)
- */
-function fmt_date_br(?string $iso): string {
-  $iso = trim((string)($iso ?? ''));
-  if ($iso === '') return '';
-  $dt = DateTime::createFromFormat('Y-m-d', $iso);
-  if ($dt instanceof DateTime) return $dt->format('d/m/Y');
-
-  // fallback: tenta pegar os 10 primeiros chars e converter
-  $iso10 = substr($iso, 0, 10);
-  $dt2 = DateTime::createFromFormat('Y-m-d', $iso10);
-  if ($dt2 instanceof DateTime) return $dt2->format('d/m/Y');
-
-  return $iso;
-}
+/** Carrega atletas do ELENCO (players) */
+//$players = q($pdo, "SELECT id, name, shirt_number, is_active FROM players ORDER BY is_active DESC, name ASC")->fetchAll();
 
 /**
  * Carrega atletas do ELENCO (players)
@@ -102,7 +91,7 @@ function fmt_date_br(?string $iso): string {
  * No projeto, jogadores adversários podem acabar cadastrados na tabela `players` (ex.: nomes "p1", "p10" etc.).
  * Para o dropdown desta tela (Transferências), devemos listar SOMENTE atletas do seu clube.
  *
- * Como a tabela `players` não possui coluna "club"/"team", usamos a regra prática:
+ * Como a tabela `players` (confirmada no projeto) não possui coluna "club"/"team", usamos a regra prática:
  * - Atletas do seu clube possuem `shirt_number` (camisa) > 0
  * - Jogadores adversários normalmente não têm numeração associada
  */
@@ -113,7 +102,6 @@ $players = q(
     WHERE shirt_number IS NOT NULL AND CAST(shirt_number AS INTEGER) > 0
     ORDER BY is_active DESC, name ASC"
 )->fetchAll();
-
 $playerOptions = [];
 foreach ($players as $p) {
   $pid = (int)$p['id'];
@@ -201,7 +189,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   // Valor: vem de hidden (centavos) ou fallback do text
   $value_cents_raw = trim((string)($_POST['value_cents'] ?? ''));
-  $value_text_raw  = trim((string)($_POST['value'] ?? ''));
+  $value_text_raw = trim((string)($_POST['value'] ?? ''));
   $value_cents = eur_to_cents($value_cents_raw !== '' ? $value_cents_raw : $value_text_raw);
 
   // regra: promovido -> origem automática
@@ -230,6 +218,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   }
 
   // valor: se preenchido, deve virar centavos
+  // (se quiser obrigatório sempre, troque a condição para exigir $value_cents !== null)
   if ($formErr === '' && $value_text_raw !== '' && $value_cents === null) {
     $formErr = 'invalid_value';
   }
@@ -316,133 +305,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   }
 }
 
-/** Listagem (com filtros e ordenação) */
-function like_escape(string $v): string {
-  // escapa \, % e _ para uso em LIKE
-  return str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $v);
-}
-
-// filtros (GET)
-$f = [
-  'date_from' => trim((string)($_GET['f_date_from'] ?? '')),
-  'date_to'   => trim((string)($_GET['f_date_to'] ?? '')),
-  'season'    => trim((string)($_GET['f_season'] ?? '')),
-  'type'      => trim((string)($_GET['f_type'] ?? '')),
-  'athlete'   => trim((string)($_GET['f_athlete'] ?? '')),
-  'origin'    => trim((string)($_GET['f_origin'] ?? '')),
-  'dest'      => trim((string)($_GET['f_dest'] ?? '')),
-  'value_min' => trim((string)($_GET['f_value_min'] ?? '')),
-  'value_max' => trim((string)($_GET['f_value_max'] ?? '')),
-];
-
-// ordenação (GET)
-$sort = trim((string)($_GET['sort'] ?? 'transaction_date'));
-$dir  = strtoupper(trim((string)($_GET['dir'] ?? 'DESC')));
-$dir  = ($dir === 'ASC') ? 'ASC' : 'DESC';
-
-// whitelist: coluna -> expressão SQL
-$SORT_MAP = [
-  'transaction_date' => 'transaction_date',
-  'season' => 'season',
-  'type' => 'type',
-  'athlete_name' => 'athlete_name',
-  'club_origin' => 'club_origin',
-  'club_destination' => 'club_destination',
-  'value' => 'CAST(value AS INTEGER)',
-];
-
-if (!array_key_exists($sort, $SORT_MAP)) {
-  $sort = 'transaction_date';
-}
-
-$where = [];
-$params = [];
-
-// date range (YYYY-MM-DD)
-if ($f['date_from'] !== '') {
-  $where[] = "transaction_date >= ?";
-  $params[] = $f['date_from'];
-}
-if ($f['date_to'] !== '') {
-  $where[] = "transaction_date <= ?";
-  $params[] = $f['date_to'];
-}
-
-// season exact
-if ($f['season'] !== '') {
-  $where[] = "season = ?";
-  $params[] = $f['season'];
-}
-
-// type exact
-if ($f['type'] !== '') {
-  $where[] = "type = ?";
-  $params[] = $f['type'];
-}
-
-// text contains (case-insensitive)
-if ($f['athlete'] !== '') {
-  $where[] = "LOWER(athlete_name) LIKE LOWER(?) ESCAPE '\\\\'";
-  $params[] = '%' . like_escape($f['athlete']) . '%';
-}
-if ($f['origin'] !== '') {
-  $where[] = "LOWER(club_origin) LIKE LOWER(?) ESCAPE '\\\\'";
-  $params[] = '%' . like_escape($f['origin']) . '%';
-}
-if ($f['dest'] !== '') {
-  $where[] = "LOWER(club_destination) LIKE LOWER(?) ESCAPE '\\\\'";
-  $params[] = '%' . like_escape($f['dest']) . '%';
-}
-
-// value range (EUR -> centavos)
-if ($f['value_min'] !== '') {
-  $c = eur_to_cents($f['value_min']);
-  if ($c !== null) {
-    $where[] = "CAST(value AS INTEGER) >= ?";
-    $params[] = $c;
-  }
-}
-if ($f['value_max'] !== '') {
-  $c = eur_to_cents($f['value_max']);
-  if ($c !== null) {
-    $where[] = "CAST(value AS INTEGER) <= ?";
-    $params[] = $c;
-  }
-}
-
-$sql = "SELECT * FROM transfers";
-if ($where) {
-  $sql .= " WHERE " . implode(" AND ", $where);
-}
-
-// ordem estável (id DESC como segundo critério)
-$sql .= " ORDER BY " . $SORT_MAP[$sort] . " " . $dir . ", id DESC";
-
-$rows = q($pdo, $sql, $params)->fetchAll();
-
-function build_qs(array $overrides = [], array $remove = []): string {
-  $q = $_GET;
-  foreach ($remove as $k) unset($q[$k]);
-  foreach ($overrides as $k => $v) {
-    if ($v === null) unset($q[$k]);
-    else $q[$k] = $v;
-  }
-  // sempre garantir page
-  $q['page'] = 'transfers';
-  return '/?' . http_build_query($q);
-}
-
-function sort_link(string $col, string $label, string $currentSort, string $currentDir): string {
-  $dir = 'ASC';
-  if ($currentSort === $col) {
-    $dir = ($currentDir === 'ASC') ? 'DESC' : 'ASC';
-  }
-  $icon = '';
-  if ($currentSort === $col) {
-    $icon = ($currentDir === 'ASC') ? ' ▲' : ' ▼';
-  }
-  return '<a href="' . h(build_qs(['sort' => $col, 'dir' => $dir, 'edit' => null])) . '" class="text-decoration-none">' . h($label) . h($icon) . '</a>';
-}
+/** Listagem */
+$rows = q($pdo, "SELECT * FROM transfers ORDER BY transaction_date DESC, id DESC")->fetchAll();
 
 render_header('Transferências');
 
@@ -537,6 +401,7 @@ echo '</div>';
 // Valor (EUR)
 $valueCents = null;
 if (($form['value'] ?? '') !== '') {
+  // se já estiver em centavos (string numérica) convert
   $valueCents = eur_to_cents((string)$form['value']);
 }
 echo '<div>';
@@ -606,84 +471,23 @@ echo '</div>';
 /** TABELA */
 echo '<div class="col-lg-8">';
 echo '<div class="card card-soft p-3">';
-echo '<div class="d-flex align-items-center justify-content-between mb-2">';
-echo '<div class="fw-bold">Histórico</div>';
-echo '<a class="btn btn-sm btn-outline-secondary" href="' . h(build_qs([
-  'f_date_from'=>null,'f_date_to'=>null,'f_season'=>null,'f_type'=>null,'f_athlete'=>null,'f_origin'=>null,'f_dest'=>null,'f_value_min'=>null,'f_value_max'=>null,
-  'sort'=>null,'dir'=>null,'edit'=>null
-])) . '">Limpar filtros</a>';
-echo '</div>';
+echo '<div class="fw-bold mb-2">Histórico</div>';
 
 if (!$rows) {
   echo '<div class="text-muted">Sem transferências cadastradas.</div>';
 } else {
-  echo '<form method="get" class="mb-2">';
-  echo '<input type="hidden" name="page" value="transfers">';
-  echo '<input type="hidden" name="sort" value="' . h($sort) . '">';
-  echo '<input type="hidden" name="dir" value="' . h($dir) . '">';
-
   echo '<div class="table-responsive">';
   echo '<table class="table align-middle mb-0">';
-  echo '<thead>';
-
-  // Cabeçalho com ordenação
-  echo '<tr>';
-  echo '<th>' . sort_link('transaction_date', 'Data', $sort, $dir) . '</th>';
-  echo '<th>' . sort_link('season', 'Temporada', $sort, $dir) . '</th>';
-  echo '<th>' . sort_link('type', 'Tipo', $sort, $dir) . '</th>';
-  echo '<th>' . sort_link('athlete_name', 'Atleta', $sort, $dir) . '</th>';
-  echo '<th>' . sort_link('club_origin', 'Origem', $sort, $dir) . '</th>';
-  echo '<th>' . sort_link('club_destination', 'Destino', $sort, $dir) . '</th>';
-  echo '<th class="text-end">' . sort_link('value', 'Valor', $sort, $dir) . '</th>';
+  echo '<thead><tr>';
+  echo '<th>Data</th>';
+  echo '<th>Temporada</th>';
+  echo '<th>Tipo</th>';
+  echo '<th>Atleta</th>';
+  echo '<th>Origem</th>';
+  echo '<th>Destino</th>';
+  echo '<th class="text-end">Valor</th>';
   echo '<th class="text-end">Ações</th>';
-  echo '</tr>';
-
-  // Linha de filtros (por coluna)
-  echo '<tr>';
-  echo '<th>';
-  echo '<div class="d-flex gap-1">';
-  echo '<input class="form-control form-control-sm" type="date" name="f_date_from" value="' . h($f['date_from']) . '" title="Data (de)" placeholder="de">';
-  echo '<input class="form-control form-control-sm" type="date" name="f_date_to" value="' . h($f['date_to']) . '" title="Data (até)" placeholder="até">';
-  echo '</div>';
-  echo '</th>';
-
-  echo '<th>';
-  echo '<select class="form-select form-select-sm" name="f_season">';
-  echo '<option value="">(todas)</option>';
-  foreach ($SEASONS as $s) {
-    $sel = ((string)$s === (string)$f['season']) ? 'selected' : '';
-    echo '<option value="' . h((string)$s) . '" ' . $sel . '>' . h((string)$s) . '</option>';
-  }
-  echo '</select>';
-  echo '</th>';
-
-  echo '<th>';
-  echo '<select class="form-select form-select-sm" name="f_type">';
-  echo '<option value="">(todos)</option>';
-  foreach ($TYPE_OPTIONS as $t) {
-    $sel = ($t === $f['type']) ? 'selected' : '';
-    echo '<option value="' . h($t) . '" ' . $sel . '>' . h($t) . '</option>';
-  }
-  echo '</select>';
-  echo '</th>';
-
-  echo '<th><input class="form-control form-control-sm" name="f_athlete" value="' . h($f['athlete']) . '" placeholder="filtrar..."></th>';
-  echo '<th><input class="form-control form-control-sm" name="f_origin" value="' . h($f['origin']) . '" placeholder="filtrar..."></th>';
-  echo '<th><input class="form-control form-control-sm" name="f_dest" value="' . h($f['dest']) . '" placeholder="filtrar..."></th>';
-
-  echo '<th class="text-end">';
-  echo '<div class="d-flex gap-1 justify-content-end">';
-  echo '<input class="form-control form-control-sm text-end" name="f_value_min" value="' . h($f['value_min']) . '" placeholder="mín">';
-  echo '<input class="form-control form-control-sm text-end" name="f_value_max" value="' . h($f['value_max']) . '" placeholder="máx">';
-  echo '</div>';
-  echo '</th>';
-
-  echo '<th class="text-end">';
-  echo '<button class="btn btn-sm btn-outline-primary" type="submit">Filtrar</button>';
-  echo '</th>';
-  echo '</tr>';
-
-  echo '</thead><tbody>';
+  echo '</tr></thead><tbody>';
 
   foreach ($rows as $r) {
     $rid = (int)$r['id'];
@@ -693,7 +497,7 @@ if (!$rows) {
     $valLbl = $valC === null ? '' : cents_to_eur_label($valC);
 
     echo '<tr>';
-    echo '<td>' . h(fmt_date_br((string)($r['transaction_date'] ?? ''))) . '</td>';
+    echo '<td>' . h((string)($r['transaction_date'] ?? '')) . '</td>';
     echo '<td>' . h((string)($r['season'] ?? '')) . '</td>';
     echo '<td>' . h((string)($r['type'] ?? '')) . '</td>';
     echo '<td>' . h((string)($r['athlete_name'] ?? '')) . '</td>';
@@ -701,14 +505,13 @@ if (!$rows) {
     echo '<td>' . h((string)($r['club_destination'] ?? '')) . '</td>';
     echo '<td class="text-end mono">' . h($valLbl) . '</td>';
     echo '<td class="text-end">';
-    echo '<a class="btn btn-sm btn-outline-primary" href="' . h(build_qs(['edit' => $rid])) . '">Editar</a>';
+    echo '<a class="btn btn-sm btn-outline-primary" href="/?page=transfers&edit=' . $rid . '">Editar</a>';
     echo '</td>';
     echo '</tr>';
   }
 
   echo '</tbody></table>';
-  echo '</div>'; // table-responsive
-  echo '</form>';
+  echo '</div>';
 }
 
 echo '</div>';
@@ -759,6 +562,7 @@ echo '</div>'; // row
       originInput.value = 'CRIA DA ACADEMIA';
       originInput.readOnly = true;
     } else {
+      // se estava travado por promoted, destrava
       originInput.readOnly = false;
     }
 
@@ -779,6 +583,7 @@ echo '</div>'; // row
     if (!digits) return {label:'', cents:''};
 
     // interpreta como centavos:
+    // "1" => 0,01 | "10" => 0,10 | "123" => 1,23 | "123456" => 1234,56
     const cents = digits.replace(/^0+/, '') || '0';
     let n = parseInt(cents, 10);
     if (isNaN(n) || n < 0) n = 0;
@@ -789,6 +594,7 @@ echo '</div>'; // row
   }
 
   function onValueInput(){
+    // pega só dígitos do que o usuário digitou
     const digits = (valueDisplay.value||'').replace(/\D+/g,'');
     const out = formatEURFromDigits(digits);
     valueDisplay.value = out.label;
