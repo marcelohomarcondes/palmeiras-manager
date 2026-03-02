@@ -463,7 +463,7 @@ if ($formErr !== '') {
 echo '<div class="row g-3">';
 
 /** FORM */
-echo '<div class="col-lg-4">';
+echo '<div class="col-lg-4 col-xl-3">';
 echo '<div class="card card-soft p-3">';
 echo '<div class="d-flex align-items-center justify-content-between mb-2">';
 echo '<div class="fw-bold">' . ($editing ? 'Editar transferência' : 'Nova transferência') . '</div>';
@@ -604,7 +604,7 @@ echo '</div>';
 echo '</div>';
 
 /** TABELA */
-echo '<div class="col-lg-8">';
+echo '<div class="col-lg-8 col-xl-9">';
 echo '<div class="card card-soft p-3">';
 echo '<div class="d-flex align-items-center justify-content-between mb-2">';
 echo '<div class="fw-bold">Histórico</div>';
@@ -817,3 +817,4 @@ echo '</div>'; // row
 </script>
 <?php
 render_footer();
+

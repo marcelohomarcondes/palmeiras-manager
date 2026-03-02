@@ -188,7 +188,7 @@ if ($msg === 'slot_removed') echo '<div class="alert alert-success card-soft">Sl
 echo '<div class="row g-3">';
 
 /* LEFT */
-echo '<div class="col-lg-4"><div class="card card-soft p-3">';
+echo '<div class="col-lg-4 col-xl-3"><div class="card card-soft p-3">';
 
 echo '<div class="fw-bold mb-2">Selecionar template</div>';
 echo '<form method="get" class="mb-3">';
@@ -244,7 +244,7 @@ if ($tpl) {
 echo '</div></div>';
 
 /* RIGHT */
-echo '<div class="col-lg-8"><div class="card card-soft p-3">';
+echo '<div class="col-lg-8 col-xl-9"><div class="card card-soft p-3">';
 
 if (!$tpl) {
   echo '<div class="text-muted">Crie um template para começar.</div>';
@@ -328,3 +328,5 @@ echo '</div></div>'; // right card
 echo '</div>';       // row
 
 render_footer();
+
+

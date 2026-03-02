@@ -162,7 +162,7 @@ $rows = q($pdo, "
 render_header('Elenco');
 
 echo '<div class="row g-3">';
-echo '<div class="col-lg-4"><div class="card card-soft p-3">';
+echo '<div class="col-lg-4 col-xl-3"><div class="card card-soft p-3">';
 echo '<div class="fw-bold mb-2">' . ($edit ? 'Editar atleta' : 'Novo atleta') . '</div>';
 
 if ($err !== '') {
@@ -224,7 +224,7 @@ echo '</form>';
 echo '<div class="text-muted small mt-3">Dica: transferências podem ativar/inativar atletas automaticamente.</div>';
 echo '</div></div>';
 
-echo '<div class="col-lg-8"><div class="card card-soft p-3">';
+echo '<div class="col-lg-8 col-xl-9"><div class="card card-soft p-3">';
 echo '<div class="d-flex justify-content-between align-items-center mb-2"><div class="fw-bold">Lista</div>';
 echo '<div class="text-muted small">Total: ' . count($rows) . '</div></div>';
 
@@ -316,3 +316,5 @@ echo '</div></div>';
 echo '</div>';
 
 render_footer();
+
+

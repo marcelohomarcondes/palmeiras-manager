@@ -38,7 +38,7 @@ $rows = q($pdo, "SELECT i.*, p.name AS player_name, p.shirt_number, p.primary_po
 render_header('Lesões');
 
 echo '<div class="row g-3">';
-echo '<div class="col-lg-4"><div class="card card-soft p-3">';
+echo '<div class="col-lg-4 col-xl-3"><div class="card card-soft p-3">';
 echo '<div class="fw-bold mb-2">' . ($edit ? 'Editar lesão' : 'Nova lesão') . '</div>';
 
 echo '<form method="post" class="vstack gap-2">';
@@ -65,7 +65,7 @@ if ($edit) echo '<a class="btn btn-outline-secondary" href="/?page=injuries">Can
 echo '</form>';
 echo '</div></div>';
 
-echo '<div class="col-lg-8"><div class="card card-soft p-3">';
+echo '<div class="col-lg-8 col-xl-9"><div class="card card-soft p-3">';
 echo '<div class="fw-bold mb-2">Histórico</div>';
 echo '<div class="table-responsive"><table class="table table-sm align-middle mb-0">';
 echo '<thead><tr><th>Data</th><th>Atleta</th><th>Tipo</th><th>Membro</th><th>Recuperação</th><th>Retorno</th><th></th></tr></thead><tbody>';
@@ -89,4 +89,6 @@ echo '</div></div>';
 echo '</div>';
 
 render_footer();
+
+
 

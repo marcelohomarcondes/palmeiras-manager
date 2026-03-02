@@ -169,7 +169,7 @@ echo '<style>
 echo '<div class="row g-3">';
 
 // Coluna esquerda: formulário
-echo '<div class="col-lg-4"><div class="card card-soft p-3">';
+echo '<div class="col-lg-4 col-xl-3"><div class="card card-soft p-3">';
 echo '<div class="d-flex align-items-center justify-content-between mb-2">';
 echo '<div class="fw-bold">' . ($edit ? 'Editar troféu' : 'Novo troféu') . '</div>';
 echo '<span class="badge text-bg-secondary">Total: ' . (int)$totalTitles . '</span>';
@@ -204,7 +204,7 @@ if ($edit) echo '<a class="btn btn-outline-secondary" href="/?page=trophies">Can
 echo '</form></div></div>';
 
 // Coluna direita: tabela + filtros + galeria visual
-echo '<div class="col-lg-8"><div class="card card-soft p-3">';
+echo '<div class="col-lg-8 col-xl-9"><div class="card card-soft p-3">';
 
 // Filtros
 echo '<div class="d-flex flex-wrap gap-2 align-items-end justify-content-between mb-2">';
@@ -398,3 +398,5 @@ echo '</div></div>'; // fecha card e col
 echo '</div>'; // fecha row
 
 render_footer();
+
+
