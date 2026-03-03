@@ -8,11 +8,11 @@ $pdo = db();
  */
 $POSITIONS = ['GOL','ZAG','LD','LE','ALD','ALE','VOL','MC','ME','MD','MEI','PD','PE','SA','ATA'];
 
+
 /**
  * Ordem customizada para ordenar por POS (GOL, ALE, LE, ZAG, LD, ALD, VOL, ME, MC, MD, MEI, PE, PD, SA, ATA)
  */
 $PRIMARY_POS_ORDER_CASE = "CASE UPPER(primary_position) WHEN 'GOL' THEN 1 WHEN 'ALE' THEN 2 WHEN 'LE' THEN 3 WHEN 'ZAG' THEN 4 WHEN 'LD' THEN 5 WHEN 'ALD' THEN 6 WHEN 'VOL' THEN 7 WHEN 'ME' THEN 8 WHEN 'MC' THEN 9 WHEN 'MD' THEN 10 WHEN 'MEI' THEN 11 WHEN 'PE' THEN 12 WHEN 'PD' THEN 13 WHEN 'SA' THEN 14 WHEN 'ATA' THEN 15 ELSE 999 END";
-
 /**
  * Helper: parse de string "PE, PD; MEI" -> ['PE','PD','MEI']
  */
@@ -35,8 +35,9 @@ if (isset($_GET['edit'])) {
 
 // Delete (GET)
 if (isset($_GET['del'])) {
+#  q($pdo, "DELETE FROM players WHERE id=?", [(int)$_GET['del']]);
+#  redirect('/?page=players');
   q($pdo, "DELETE FROM players WHERE id=? AND club_name = ? COLLATE NOCASE", [(int)$_GET['del'], app_club()]);
-  // Mantive o comportamento original (sem redirect imediato) para não alterar fluxo do projeto.
 }
 
 // Save (POST)
@@ -101,13 +102,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 /**
  * SORT POR COLUNA (seleção em cada coluna)
+ * Cada select envia ASC/DESC para sua coluna; só 1 deve ficar ativo por vez.
+ * Mantém o estilo atual (apenas adiciona os selects no cabeçalho).
  */
 $allowedDirs = ['ASC', 'DESC'];
 
 $sortKey = null;
 $sortDir = null;
 
-// prioridade fixa (se vier mais de um select preenchido)
+// prioridade fixa (se, por algum motivo, vier mais de um select preenchido)
 $sortSelectMap = [
   'sort_number'    => 'number',
   'sort_name'      => 'name',
@@ -128,13 +131,15 @@ foreach ($sortSelectMap as $param => $key) {
 }
 
 // ORDER BY padrão atual (quando não há sort selecionado)
+#$defaultOrderBy = "is_active DESC, primary_position ASC, shirt_number ASC, name ASC";
 $defaultOrderBy = "is_active DESC, {$PRIMARY_POS_ORDER_CASE} ASC, shirt_number ASC, name ASC";
 
-// Monta ORDER BY com base no sort selecionado
+// Monta ORDER BY com base no sort selecionado (com tie-breakers estáveis)
 $orderBy = $defaultOrderBy;
 
 if ($sortKey !== null && $sortDir !== null) {
   if ($sortKey === 'number') {
+    // números nulos sempre no fim, independente do sentido
     $orderBy = "shirt_number IS NULL ASC, shirt_number {$sortDir}, name ASC";
   } elseif ($sortKey === 'name') {
     $orderBy = "name {$sortDir}";
@@ -147,62 +152,12 @@ if ($sortKey !== null && $sortDir !== null) {
   }
 }
 
-/**
- * ✅ Busca jogadores + último tipo de transferência (para separar Vendidos/Emprestados)
- * - Não altera DB
- * - Não perde estatísticas
- * - Apenas classifica melhor o status no players.php
- */
 $rows = q($pdo, "
-  SELECT
-    p.*,
-    (
-      SELECT t.type
-      FROM transfers t
-      WHERE t.player_id = p.id
-      ORDER BY t.transaction_date DESC, t.id DESC
-      LIMIT 1
-    ) AS last_transfer_type,
-    (
-      SELECT t.transaction_date
-      FROM transfers t
-      WHERE t.player_id = p.id
-      ORDER BY t.transaction_date DESC, t.id DESC
-      LIMIT 1
-    ) AS last_transfer_date
-  FROM players p
-  WHERE p.club_name = ? COLLATE NOCASE
+  SELECT *
+  FROM players
+  WHERE club_name = ? COLLATE NOCASE
   ORDER BY {$orderBy}
 ", [app_club()])->fetchAll();
-
-/**
- * ✅ Apartar por grupos:
- * - Ativos
- * - Emprestados (última saída por empréstimo)
- * - Vendidos (última venda)
- * - Outros inativos
- */
-$ativos = [];
-$emprestados = [];
-$vendidos = [];
-$inativosOutros = [];
-
-foreach ($rows as $r) {
-  $isActive = (int)($r['is_active'] ?? 0) === 1;
-  $lt = strtoupper(trim((string)($r['last_transfer_type'] ?? '')));
-
-  if ($isActive) {
-    $ativos[] = $r;
-  } else {
-    if ($lt === 'SAIU POR EMPRÉSTIMO') {
-      $emprestados[] = $r;
-    } elseif ($lt === 'VENDIDO') {
-      $vendidos[] = $r;
-    } else {
-      $inativosOutros[] = $r;
-    }
-  }
-}
 
 render_header('Elenco');
 
@@ -280,11 +235,16 @@ echo '<form method="get" id="sortFormPlayers">';
 echo '<input type="hidden" name="page" value="players">';
 if (isset($_GET['edit'])) echo '<input type="hidden" name="edit" value="' . (int)$_GET['edit'] . '">';
 
+echo '<table class="table table-sm align-middle mb-0">';
+
+echo '<thead><tr>';
+
 function sortSelect(string $name, ?string $activeKey, ?string $activeDir, string $thisKey): string {
   $isActive = ($activeKey === $thisKey) ? ($activeDir ?? '') : '';
   $selNone = ($isActive === '') ? ' selected' : '';
   $selAsc  = ($isActive === 'ASC') ? ' selected' : '';
   $selDesc = ($isActive === 'DESC') ? ' selected' : '';
+  // sem estilos custom; só classes já usadas no projeto (bootstrap)
   return '<select class="form-select form-select-sm js-sortcol" name="' . h($name) . '" data-key="' . h($thisKey) . '">' .
            '<option value=""' . $selNone . '>—</option>' .
            '<option value="ASC"' . $selAsc . '>↑</option>' .
@@ -292,74 +252,45 @@ function sortSelect(string $name, ?string $activeKey, ?string $activeDir, string
          '</select>';
 }
 
-function renderPlayersTable(array $list, string $title, string $titleBadgeHtml, ?string $emptyText = null): void {
-  echo '<div class="mb-3">';
-  echo '<div class="d-flex align-items-center justify-content-between mb-1">';
-  echo '<div class="fw-bold">' . h($title) . '</div>';
-  echo '<div class="text-muted small">' . $titleBadgeHtml . '</div>';
-  echo '</div>';
+// th # (numeração)
+echo '<th>#' . sortSelect('sort_number', $sortKey, $sortDir, 'number') . '</th>';
 
-  echo '<table class="table table-sm align-middle mb-0">';
-  echo '<thead><tr>';
+// th Nome
+echo '<th>Atleta' . sortSelect('sort_name', $sortKey, $sortDir, 'name') . '</th>';
 
-  // Header com selects (mantém exatamente o padrão anterior)
-  global $sortKey, $sortDir;
-  echo '<th>#' . sortSelect('sort_number', $sortKey, $sortDir, 'number') . '</th>';
-  echo '<th>Atleta' . sortSelect('sort_name', $sortKey, $sortDir, 'name') . '</th>';
-  echo '<th>Posição' . sortSelect('sort_primary', $sortKey, $sortDir, 'primary') . '</th>';
-  echo '<th>Pos. Sec.' . sortSelect('sort_secondary', $sortKey, $sortDir, 'secondary') . '</th>';
-  echo '<th>Status' . sortSelect('sort_status', $sortKey, $sortDir, 'status') . '</th>';
-  echo '<th></th>';
+// th Posição primária
+echo '<th>Posição' . sortSelect('sort_primary', $sortKey, $sortDir, 'primary') . '</th>';
 
-  echo '</tr></thead><tbody>';
+// th Secundárias
+echo '<th>Pos. Sec.' . sortSelect('sort_secondary', $sortKey, $sortDir, 'secondary') . '</th>';
 
-  if (!$list) {
-    $txt = $emptyText ?? 'Nenhum atleta.';
-    echo '<tr><td colspan="6" class="text-muted">' . h($txt) . '</td></tr>';
-  } else {
-    foreach ($list as $r) {
-      $isActive = (int)$r['is_active'] === 1;
-      $lt = strtoupper(trim((string)($r['last_transfer_type'] ?? '')));
-      $badge = '';
+// th Status
+echo '<th>Status' . sortSelect('sort_status', $sortKey, $sortDir, 'status') . '</th>';
 
-      if ($isActive) {
-        $badge = '<span class="badge text-bg-success">Ativo</span>';
-      } elseif ($lt === 'SAIU POR EMPRÉSTIMO') {
-        $badge = '<span class="badge text-bg-warning">Emprestado</span>';
-      } elseif ($lt === 'VENDIDO') {
-        $badge = '<span class="badge text-bg-danger">Vendido</span>';
-      } else {
-        $badge = '<span class="badge text-bg-secondary">Inativo</span>';
-      }
+// th ações
+echo '<th></th>';
 
-      echo '<tr>';
-      echo '<td class="mono">' . h((string)($r['shirt_number'] ?? '')) . '</td>';
-      echo '<td>' . h($r['name']) . '</td>';
-      echo '<td>' . h($r['primary_position']) . '</td>';
-      echo '<td class="text-muted">' . h((string)$r['secondary_positions']) . '</td>';
-      echo '<td>' . $badge . '</td>';
-      echo '<td class="text-end">';
-      echo '<a class="btn btn-sm btn-outline-primary" href="/?page=players&edit=' . (int)$r['id'] . '">Editar</a> ';
-      echo '<a class="btn btn-sm btn-outline-danger" href="/?page=players&del=' . (int)$r['id'] . '" onclick="return confirm(\'Excluir atleta?\')">Excluir</a>';
-      echo '</td>';
-      echo '</tr>';
-    }
-  }
+echo '</tr></thead><tbody>';
 
-  echo '</tbody></table>';
-  echo '</div>';
+foreach ($rows as $r) {
+  echo '<tr>';
+  echo '<td class="mono">' . h((string)($r['shirt_number'] ?? '')) . '</td>';
+  echo '<td>' . h($r['name']) . '</td>';
+  echo '<td>' . h($r['primary_position']) . '</td>';
+  echo '<td class="text-muted">' . h((string)$r['secondary_positions']) . '</td>';
+  echo '<td>' . ((int)$r['is_active'] === 1 ? '<span class="badge text-bg-success">Ativo</span>' : '<span class="badge text-bg-secondary">Inativo</span>') . '</td>';
+  echo '<td class="text-end">';
+  echo '<a class="btn btn-sm btn-outline-primary" href="/?page=players&edit=' . (int)$r['id'] . '">Editar</a> ';
+  echo '<a class="btn btn-sm btn-outline-danger" href="/?page=players&del=' . (int)$r['id'] . '" onclick="return confirm(\'Excluir atleta?\')">Excluir</a>';
+  echo '</td>';
+  echo '</tr>';
 }
 
-// Seções apartadas
-renderPlayersTable($ativos, 'Elenco Ativo', 'Total: ' . count($ativos), 'Nenhum atleta ativo.');
-renderPlayersTable($emprestados, 'Emprestados', 'Total: ' . count($emprestados), 'Nenhum atleta emprestado.');
-renderPlayersTable($vendidos, 'Vendidos', 'Total: ' . count($vendidos), 'Nenhum atleta vendido.');
-renderPlayersTable($inativosOutros, 'Outros Inativos', 'Total: ' . count($inativosOutros), 'Nenhum outro inativo.');
-
+echo '</tbody></table>';
 echo '</form>'; // sortFormPlayers
 echo '</div>';  // table-responsive
 
-// JS mínimo: ao selecionar uma coluna, limpa as outras e submete (mantém estilo)
+// JS mínimo: ao selecionar uma coluna, limpa as outras e submete (sem mexer no estilo)
 echo '<script>
 (function () {
   var form = document.getElementById("sortFormPlayers");
@@ -385,3 +316,5 @@ echo '</div></div>';
 echo '</div>';
 
 render_footer();
+
+
