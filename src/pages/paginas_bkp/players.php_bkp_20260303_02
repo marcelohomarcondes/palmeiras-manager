@@ -11,23 +11,7 @@ $POSITIONS = ['GOL','ZAG','LD','LE','ALD','ALE','VOL','MC','ME','MD','MEI','PD',
 /**
  * Ordem customizada para ordenar por POS (GOL, ALE, LE, ZAG, LD, ALD, VOL, ME, MC, MD, MEI, PE, PD, SA, ATA)
  */
-$PRIMARY_POS_ORDER_CASE = "CASE UPPER(primary_position)
-  WHEN 'GOL' THEN 1
-  WHEN 'ALE' THEN 2
-  WHEN 'LE'  THEN 3
-  WHEN 'ZAG' THEN 4
-  WHEN 'LD'  THEN 5
-  WHEN 'ALD' THEN 6
-  WHEN 'VOL' THEN 7
-  WHEN 'ME'  THEN 8
-  WHEN 'MC'  THEN 9
-  WHEN 'MD'  THEN 10
-  WHEN 'MEI' THEN 11
-  WHEN 'PE'  THEN 12
-  WHEN 'PD'  THEN 13
-  WHEN 'SA'  THEN 14
-  WHEN 'ATA' THEN 15
-  ELSE 999 END";
+$PRIMARY_POS_ORDER_CASE = "CASE UPPER(primary_position) WHEN 'GOL' THEN 1 WHEN 'ALE' THEN 2 WHEN 'LE' THEN 3 WHEN 'ZAG' THEN 4 WHEN 'LD' THEN 5 WHEN 'ALD' THEN 6 WHEN 'VOL' THEN 7 WHEN 'ME' THEN 8 WHEN 'MC' THEN 9 WHEN 'MD' THEN 10 WHEN 'MEI' THEN 11 WHEN 'PE' THEN 12 WHEN 'PD' THEN 13 WHEN 'SA' THEN 14 WHEN 'ATA' THEN 15 ELSE 999 END";
 
 /**
  * Helper: parse de string "PE, PD; MEI" -> ['PE','PD','MEI']
@@ -41,95 +25,21 @@ function parse_positions(string $raw): array {
   return $parts;
 }
 
-/**
- * Determina temporada padrão para registros gerados via players.php (aposentadoria).
- * Preferência: última season registrada em matches; fallback: ano atual.
- */
-function current_season(PDO $pdo): string {
-  try {
-    $r = q($pdo, "SELECT season FROM matches WHERE season IS NOT NULL AND TRIM(season)<>'' ORDER BY match_date DESC, id DESC LIMIT 1")->fetch();
-    if ($r && isset($r['season']) && trim((string)$r['season']) !== '') return (string)$r['season'];
-  } catch (Throwable $e) { /* ignore */ }
-  return date('Y');
-}
-
 $err = '';
 $edit = null;
 
-/**
- * ✅ Aposentar (GET)
- * - Registra em transfers como APOSENTADORIA
- * - Seta is_active=0
- * - Mantém histórico (não apaga jogador)
- */
-if (isset($_GET['retire'])) {
-  $pid = (int)$_GET['retire'];
-
-  $p = q($pdo,
-    "SELECT id, name
-       FROM players
-      WHERE id=? AND club_name = ? COLLATE NOCASE
-      LIMIT 1",
-    [$pid, app_club()]
-  )->fetch();
-
-  if ($p) {
-    $season = current_season($pdo);
-    $today = date('Y-m-d');
-
-    // grava em transfers (mantendo o padrão de colunas do projeto)
-    // Obs: value/term/grade/extra/shirt podem ser NULL
-    q($pdo,
-      "INSERT INTO transfers(
-          season, type, player_id, athlete_name,
-          club_origin, club_destination,
-          value, term, grade, extra_player_name, shirt_number_assigned,
-          transaction_date, notes
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-      [
-        $season,
-        'APOSENTADORIA',
-        (int)$p['id'],
-        (string)$p['name'],
-        app_club(),
-        'APOSENTADORIA',
-        null,
-        null,
-        null,
-        null,
-        null,
-        $today,
-        'Aposentado via players.php'
-      ]
-    );
-
-    // inativa o jogador no elenco
-    q($pdo, "UPDATE players SET is_active=0, updated_at=datetime('now') WHERE id=? AND club_name = ? COLLATE NOCASE", [(int)$p['id'], app_club()]);
-  }
-
-  redirect('/?page=players');
-}
-
-/** Edit (GET) */
+// Edit (GET)
 if (isset($_GET['edit'])) {
-  $edit = q($pdo, "SELECT * FROM players WHERE id=? AND club_name = ? COLLATE NOCASE", [(int)$_GET['edit'], app_club()])->fetch() ?: null;
+  $edit = q($pdo, "SELECT * FROM players WHERE id=?", [(int)$_GET['edit']])->fetch() ?: null;
 }
 
-/** Delete (GET) */
+// Delete (GET)
 if (isset($_GET['del'])) {
-  $idDel = (int)$_GET['del'];
-  try {
-    q($pdo, "DELETE FROM players WHERE id=? AND club_name = ? COLLATE NOCASE", [$idDel, app_club()]);
-  } catch (Throwable $e) {
-    // Evita “tela branca” quando FK RESTRICT impedir delete
-    $err = 'Não foi possível excluir este atleta (há histórico vinculado).';
-  }
-  if ($err === '') {
-    redirect('/?page=players');
-  }
+  q($pdo, "DELETE FROM players WHERE id=? AND club_name = ? COLLATE NOCASE", [(int)$_GET['del'], app_club()]);
+  // Mantive o comportamento original (sem redirect imediato) para não alterar fluxo do projeto.
 }
 
-/** Save (POST) */
+// Save (POST)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $id = (int)($_POST['id'] ?? 0);
   $name = trim((string)($_POST['name'] ?? ''));
@@ -148,7 +58,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   ), fn($v) => $v !== '')));
 
   // filtra apenas posições válidas (evita valores injetados)
+  global $POSITIONS;
   $secArr = array_values(array_filter($secArr, fn($v) => in_array($v, $POSITIONS, true)));
+
   $sec = implode(',', $secArr);
 
   $active = isset($_POST['is_active']) ? 1 : 0;
@@ -160,8 +72,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $err = 'Selecione uma posição primária válida.';
   }
 
+  // Se erro, mantém os valores no form (sem perder o que foi imputado)
   if ($err !== '') {
-    // preserva input no form
     $edit = [
       'id' => $id,
       'name' => $name,
@@ -172,16 +84,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     ];
   } else {
     if ($id > 0) {
-      q($pdo,
-        "UPDATE players
-            SET name=?, shirt_number=?, primary_position=?, secondary_positions=?, is_active=?, updated_at=datetime('now')
-          WHERE id=? AND club_name = ? COLLATE NOCASE",
+      q($pdo, "UPDATE players
+              SET name=?, shirt_number=?, primary_position=?, secondary_positions=?, is_active=?, updated_at=datetime('now')
+              WHERE id=? AND club_name = ? COLLATE NOCASE",
         [$name, $shirt, $prim, $sec, $active, $id, app_club()]
       );
     } else {
-      q($pdo,
-        "INSERT INTO players(name, shirt_number, primary_position, secondary_positions, is_active, club_name)
-         VALUES (?,?,?,?,?,?)",
+      q($pdo, "INSERT INTO players(name, shirt_number, primary_position, secondary_positions, is_active, club_name)
+                VALUES (?,?,?,?,?,?)",
         [$name, $shirt, $prim, $sec, $active, app_club()]
       );
     }
@@ -238,7 +148,10 @@ if ($sortKey !== null && $sortDir !== null) {
 }
 
 /**
- * ✅ Busca jogadores + último tipo de transferência (para separar Vendidos/Emprestados/Aposentados)
+ * ✅ Busca jogadores + último tipo de transferência (para separar Vendidos/Emprestados)
+ * - Não altera DB
+ * - Não perde estatísticas
+ * - Apenas classifica melhor o status no players.php
  */
 $rows = q($pdo, "
   SELECT
@@ -267,13 +180,11 @@ $rows = q($pdo, "
  * - Ativos
  * - Emprestados (última saída por empréstimo)
  * - Vendidos (última venda)
- * - Aposentados
  * - Outros inativos
  */
 $ativos = [];
 $emprestados = [];
 $vendidos = [];
-$aposentados = [];
 $inativosOutros = [];
 
 foreach ($rows as $r) {
@@ -283,9 +194,7 @@ foreach ($rows as $r) {
   if ($isActive) {
     $ativos[] = $r;
   } else {
-    if ($lt === 'APOSENTADORIA') {
-      $aposentados[] = $r;
-    } elseif ($lt === 'SAIU POR EMPRÉSTIMO') {
+    if ($lt === 'SAIU POR EMPRÉSTIMO') {
       $emprestados[] = $r;
     } elseif ($lt === 'VENDIDO') {
       $vendidos[] = $r;
@@ -298,13 +207,11 @@ foreach ($rows as $r) {
 render_header('Elenco');
 
 echo '<div class="row g-3">';
-
-/** FORM (lado esquerdo) */
 echo '<div class="col-lg-4 col-xl-3"><div class="card card-soft p-3">';
 echo '<div class="fw-bold mb-2">' . ($edit ? 'Editar atleta' : 'Novo atleta') . '</div>';
 
 if ($err !== '') {
-  echo '<div class="alert alert-warning card-soft py-2 mb-2">' . h($err) . '</div>';
+  echo '<div class="alert alert-danger py-2 mb-2">' . h($err) . '</div>';
 }
 
 echo '<form method="post" class="vstack gap-2">';
@@ -315,7 +222,7 @@ if ($edit && isset($edit['id']) && (int)$edit['id'] > 0) {
 echo '<div><label class="form-label">Nome</label><input class="form-control" name="name" required value="' . h($edit['name'] ?? '') . '"></div>';
 echo '<div><label class="form-label">Número</label><input class="form-control" type="number" name="shirt_number" value="' . h((string)($edit['shirt_number'] ?? '')) . '"></div>';
 
-// Posição primária
+// Posição primária (dropdown)
 $primVal = (string)($edit['primary_position'] ?? '');
 echo '<div>';
 echo '<label class="form-label">Posição primária</label>';
@@ -328,7 +235,7 @@ foreach ($POSITIONS as $p) {
 echo '</select>';
 echo '</div>';
 
-// Posições secundárias
+// Posições secundárias (checkboxes)
 $secSelected = parse_positions((string)($edit['secondary_positions'] ?? ''));
 
 echo '<div>';
@@ -362,18 +269,16 @@ echo '</form>';
 echo '<div class="text-muted small mt-3">Dica: transferências podem ativar/inativar atletas automaticamente.</div>';
 echo '</div></div>';
 
-/** LISTA (lado direito) */
 echo '<div class="col-lg-8 col-xl-9"><div class="card card-soft p-3">';
-echo '<div class="d-flex justify-content-between align-items-center mb-2">';
-echo '<div class="fw-bold">Lista</div>';
-echo '<div class="text-muted small">Total: ' . count($rows) . '</div>';
-echo '</div>';
+echo '<div class="d-flex justify-content-between align-items-center mb-2"><div class="fw-bold">Lista</div>';
+echo '<div class="text-muted small">Total: ' . count($rows) . '</div></div>';
 
 echo '<div class="table-responsive">';
 
-// Form GET para sort por coluna
+// Form GET para sort por coluna (sem mudar layout geral)
 echo '<form method="get" id="sortFormPlayers">';
 echo '<input type="hidden" name="page" value="players">';
+if (isset($_GET['edit'])) echo '<input type="hidden" name="edit" value="' . (int)$_GET['edit'] . '">';
 
 function sortSelect(string $name, ?string $activeKey, ?string $activeDir, string $thisKey): string {
   $isActive = ($activeKey === $thisKey) ? ($activeDir ?? '') : '';
@@ -387,34 +292,25 @@ function sortSelect(string $name, ?string $activeKey, ?string $activeDir, string
          '</select>';
 }
 
-function badge_for_row(array $r): string {
-  $isActive = (int)($r['is_active'] ?? 0) === 1;
-  $lt = strtoupper(trim((string)($r['last_transfer_type'] ?? '')));
-
-  if ($isActive) return '<span class="badge text-bg-success">Ativo</span>';
-  if ($lt === 'SAIU POR EMPRÉSTIMO') return '<span class="badge text-bg-warning">Emprestado</span>';
-  if ($lt === 'VENDIDO') return '<span class="badge text-bg-danger">Vendido</span>';
-  if ($lt === 'APOSENTADORIA') return '<span class="badge text-bg-dark">Aposentado</span>';
-  return '<span class="badge text-bg-secondary">Inativo</span>';
-}
-
-function render_section(string $title, array $list, ?string $emptyText = null): void {
-  global $sortKey, $sortDir;
-
+function renderPlayersTable(array $list, string $title, string $titleBadgeHtml, ?string $emptyText = null): void {
   echo '<div class="mb-3">';
   echo '<div class="d-flex align-items-center justify-content-between mb-1">';
   echo '<div class="fw-bold">' . h($title) . '</div>';
-  echo '<div class="text-muted small">Total: ' . count($list) . '</div>';
+  echo '<div class="text-muted small">' . $titleBadgeHtml . '</div>';
   echo '</div>';
 
   echo '<table class="table table-sm align-middle mb-0">';
   echo '<thead><tr>';
+
+  // Header com selects (mantém exatamente o padrão anterior)
+  global $sortKey, $sortDir;
   echo '<th>#' . sortSelect('sort_number', $sortKey, $sortDir, 'number') . '</th>';
   echo '<th>Atleta' . sortSelect('sort_name', $sortKey, $sortDir, 'name') . '</th>';
   echo '<th>Posição' . sortSelect('sort_primary', $sortKey, $sortDir, 'primary') . '</th>';
   echo '<th>Pos. Sec.' . sortSelect('sort_secondary', $sortKey, $sortDir, 'secondary') . '</th>';
   echo '<th>Status' . sortSelect('sort_status', $sortKey, $sortDir, 'status') . '</th>';
   echo '<th></th>';
+
   echo '</tr></thead><tbody>';
 
   if (!$list) {
@@ -422,23 +318,28 @@ function render_section(string $title, array $list, ?string $emptyText = null): 
     echo '<tr><td colspan="6" class="text-muted">' . h($txt) . '</td></tr>';
   } else {
     foreach ($list as $r) {
-      echo '<tr>';
-      echo '<td class="mono">' . h((string)($r['shirt_number'] ?? '')) . '</td>';
-      echo '<td>' . h((string)$r['name']) . '</td>';
-      echo '<td>' . h((string)$r['primary_position']) . '</td>';
-      echo '<td class="text-muted">' . h((string)$r['secondary_positions']) . '</td>';
-      echo '<td>' . badge_for_row($r) . '</td>';
-      echo '<td class="text-end">';
-
-      // Ações
-      echo '<a class="btn btn-sm btn-outline-primary" href="/?page=players&edit=' . (int)$r['id'] . '">Editar</a> ';
-
-      // Aposentar: só se não estiver aposentado já
+      $isActive = (int)$r['is_active'] === 1;
       $lt = strtoupper(trim((string)($r['last_transfer_type'] ?? '')));
-      if ($lt !== 'APOSENTADORIA') {
-        echo '<a class="btn btn-sm btn-outline-warning" href="/?page=players&retire=' . (int)$r['id'] . '" onclick="return confirm(\'Marcar este atleta como APOSENTADO?\')">Aposentar</a> ';
+      $badge = '';
+
+      if ($isActive) {
+        $badge = '<span class="badge text-bg-success">Ativo</span>';
+      } elseif ($lt === 'SAIU POR EMPRÉSTIMO') {
+        $badge = '<span class="badge text-bg-warning">Emprestado</span>';
+      } elseif ($lt === 'VENDIDO') {
+        $badge = '<span class="badge text-bg-danger">Vendido</span>';
+      } else {
+        $badge = '<span class="badge text-bg-secondary">Inativo</span>';
       }
 
+      echo '<tr>';
+      echo '<td class="mono">' . h((string)($r['shirt_number'] ?? '')) . '</td>';
+      echo '<td>' . h($r['name']) . '</td>';
+      echo '<td>' . h($r['primary_position']) . '</td>';
+      echo '<td class="text-muted">' . h((string)$r['secondary_positions']) . '</td>';
+      echo '<td>' . $badge . '</td>';
+      echo '<td class="text-end">';
+      echo '<a class="btn btn-sm btn-outline-primary" href="/?page=players&edit=' . (int)$r['id'] . '">Editar</a> ';
       echo '<a class="btn btn-sm btn-outline-danger" href="/?page=players&del=' . (int)$r['id'] . '" onclick="return confirm(\'Excluir atleta?\')">Excluir</a>';
       echo '</td>';
       echo '</tr>';
@@ -449,17 +350,16 @@ function render_section(string $title, array $list, ?string $emptyText = null): 
   echo '</div>';
 }
 
-// Seções
-render_section('Elenco Ativo', $ativos, 'Nenhum atleta ativo.');
-render_section('Emprestados', $emprestados, 'Nenhum atleta emprestado.');
-render_section('Vendidos', $vendidos, 'Nenhum atleta vendido.');
-render_section('Aposentados', $aposentados, 'Nenhum atleta aposentado.');
-render_section('Outros Inativos', $inativosOutros, 'Nenhum outro inativo.');
+// Seções apartadas
+renderPlayersTable($ativos, 'Elenco Ativo', 'Total: ' . count($ativos), 'Nenhum atleta ativo.');
+renderPlayersTable($emprestados, 'Emprestados', 'Total: ' . count($emprestados), 'Nenhum atleta emprestado.');
+renderPlayersTable($vendidos, 'Vendidos', 'Total: ' . count($vendidos), 'Nenhum atleta vendido.');
+renderPlayersTable($inativosOutros, 'Outros Inativos', 'Total: ' . count($inativosOutros), 'Nenhum outro inativo.');
 
 echo '</form>'; // sortFormPlayers
 echo '</div>';  // table-responsive
 
-// JS: ao selecionar uma coluna, limpa as outras e submete
+// JS mínimo: ao selecionar uma coluna, limpa as outras e submete (mantém estilo)
 echo '<script>
 (function () {
   var form = document.getElementById("sortFormPlayers");
@@ -481,9 +381,7 @@ echo '<script>
 })();
 </script>';
 
-echo '</div></div>'; // card/list
-echo '</div>';       // col/list
-
-echo '</div>'; // row
+echo '</div></div>';
+echo '</div>';
 
 render_footer();
