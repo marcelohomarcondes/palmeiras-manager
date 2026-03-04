@@ -412,5 +412,3 @@ echo '</div></div>';
 echo '</div>';
 
 render_footer();
-
-

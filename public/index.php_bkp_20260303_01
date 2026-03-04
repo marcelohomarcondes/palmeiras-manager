@@ -15,7 +15,6 @@ $routes = [
 
   // Cadastrar partida (cadastro completo: infos + jogadores + stats)
   'create_match' => __DIR__ . '/../src/pages/create_match.php',
-  'edit_match'   => __DIR__ . '/../src/pages/edit_match.php',
 
   // Detalhe da partida (consulta/edição pontual, se você mantiver)
   'match'        => __DIR__ . '/../src/pages/match.php',
