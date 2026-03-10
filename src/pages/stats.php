@@ -594,9 +594,8 @@ $topConsecutiveGames = [];
 $topScorers = [];
 $topAssists = [];
 
-$sqlTopGames = "
-  SELECT p.name AS player_name, COUNT(DISTINCT part.match_id) AS games
-  FROM (
+$playerParticipationSubquery = "
+  (
     SELECT mp.match_id, mp.player_id
     FROM match_players mp
     WHERE mp.player_id IS NOT NULL
@@ -605,7 +604,26 @@ $sqlTopGames = "
         UPPER(TRIM(COALESCE(mp.role,''))) = 'STARTER'
         OR COALESCE(mp.entered, 0) = 1
       )
-  ) part
+
+    UNION
+
+    SELECT s.match_id, s.player_in_id AS player_id
+    FROM substitutions s
+    WHERE s.player_in_id IS NOT NULL
+      AND UPPER(TRIM(s.club_name)) = $clubNorm
+
+    UNION
+
+    SELECT mps.match_id, mps.player_id
+    FROM match_player_stats mps
+    WHERE mps.player_id IS NOT NULL
+      AND UPPER(TRIM(mps.club_name)) = $clubNorm
+  )
+";
+
+$sqlTopGames = "
+  SELECT p.name AS player_name, COUNT(DISTINCT part.match_id) AS games
+  FROM $playerParticipationSubquery part
   JOIN players p ON p.id = part.player_id
   JOIN matches m ON m.id = part.match_id
   $whereSql
@@ -621,16 +639,14 @@ $topGames100 = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
 $sqlCleanSheets = "
   SELECT p.name AS player_name, COUNT(DISTINCT part.match_id) AS clean_sheets
   FROM (
-    SELECT mp.match_id, mp.player_id
-    FROM match_players mp
-    JOIN players p2 ON p2.id = mp.player_id
-    WHERE mp.player_id IS NOT NULL
-      AND UPPER(TRIM(mp.club_name)) = $clubNorm
-      AND (
-        UPPER(TRIM(COALESCE(mp.role,''))) = 'STARTER'
-        OR COALESCE(mp.entered, 0) = 1
-      )
-      AND UPPER(TRIM(COALESCE(NULLIF(mp.position,''), p2.primary_position, ''))) IN ('GK','GOL','GOLEIRO')
+    SELECT pp.match_id, pp.player_id
+    FROM $playerParticipationSubquery pp
+    JOIN players p2 ON p2.id = pp.player_id
+    LEFT JOIN match_players mp
+      ON mp.match_id = pp.match_id
+     AND mp.player_id = pp.player_id
+     AND UPPER(TRIM(mp.club_name)) = $clubNorm
+    WHERE UPPER(TRIM(COALESCE(NULLIF(mp.position,''), p2.primary_position, ''))) IN ('GK','GOL','GOLEIRO')
   ) part
   JOIN players p ON p.id = part.player_id
   JOIN matches m ON m.id = part.match_id
@@ -650,19 +666,38 @@ if ($matches) {
   $in = implode(',', array_fill(0, count($matchIds), '?'));
 
   $sqlPlays = "
-    SELECT mp.match_id, mp.player_id
-    FROM match_players mp
-    WHERE mp.match_id IN ($in)
-      AND mp.player_id IS NOT NULL
-      AND UPPER(TRIM(mp.club_name)) = UPPER(TRIM(?))
-      AND (
-        UPPER(TRIM(COALESCE(mp.role,''))) = 'STARTER'
-        OR COALESCE(mp.entered, 0) = 1
-      )
+    SELECT part.match_id, part.player_id
+    FROM (
+      SELECT mp.match_id, mp.player_id
+      FROM match_players mp
+      WHERE mp.match_id IN ($in)
+        AND mp.player_id IS NOT NULL
+        AND UPPER(TRIM(mp.club_name)) = UPPER(TRIM(?))
+        AND (
+          UPPER(TRIM(COALESCE(mp.role,''))) = 'STARTER'
+          OR COALESCE(mp.entered, 0) = 1
+        )
+
+      UNION
+
+      SELECT s.match_id, s.player_in_id AS player_id
+      FROM substitutions s
+      WHERE s.match_id IN ($in)
+        AND s.player_in_id IS NOT NULL
+        AND UPPER(TRIM(s.club_name)) = UPPER(TRIM(?))
+
+      UNION
+
+      SELECT mps.match_id, mps.player_id
+      FROM match_player_stats mps
+      WHERE mps.match_id IN ($in)
+        AND mps.player_id IS NOT NULL
+        AND UPPER(TRIM(mps.club_name)) = UPPER(TRIM(?))
+    ) part
   ";
 
   $st = $pdo->prepare($sqlPlays);
-  $params = array_merge($matchIds, [$club]);
+  $params = array_merge($matchIds, [$club], $matchIds, [$club], $matchIds, [$club]);
   $st->execute($params);
   $rows = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
@@ -708,18 +743,7 @@ if ($matches) {
 // Artilheiros e assistências (somente com match_player_stats)
 // -----------------------------------------------------------------------------
 if ($mpStatsAvailable && ($goalsCol || $assistsCol)) {
-  $playedSubquery = "
-    (
-      SELECT mp.match_id, mp.player_id
-      FROM match_players mp
-      WHERE mp.player_id IS NOT NULL
-        AND UPPER(TRIM(mp.club_name)) = $clubNorm
-        AND (
-          UPPER(TRIM(COALESCE(mp.role,''))) = 'STARTER'
-          OR COALESCE(mp.entered, 0) = 1
-        )
-    )
-  ";
+  $playedSubquery = $playerParticipationSubquery;
 
   if ($goalsCol) {
     $sql = "
