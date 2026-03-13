@@ -41,6 +41,7 @@ $routes = [
   'almanaque_lineups'      => __DIR__ . '/../src/pages/almanaque_lineups.php',
   'almanaque_transfers'    => __DIR__ . '/../src/pages/almanaque_transfers.php',
   'almanaque_injuries'     => __DIR__ . '/../src/pages/almanaque_injuries.php',
+  'almanaque_stadiums'     => __DIR__ . '/../src/pages/almanaque_stadiums.php',
 ];
 
 /*
