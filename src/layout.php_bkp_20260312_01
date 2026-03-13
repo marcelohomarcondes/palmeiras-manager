@@ -19,6 +19,11 @@ declare(strict_types=1);
 function render_header(string $title): void {
   $page = (string)($_GET['page'] ?? 'dashboard');
 
+  // Mantém o menu "Partidas" ativo também nas telas relacionadas
+  if (in_array($page, ['match','create_match','edit_match'], true)) {
+    $page = 'matches';
+  }
+
   $items = [
     'dashboard'  => ['Dashboard', 'bi-speedometer2'],
     'matches'    => ['Partidas', 'bi-calendar3'],
@@ -30,6 +35,7 @@ function render_header(string $title): void {
     'trophies'   => ['Troféus', 'bi-trophy'],
     'opponents'  => ['Vs Adversários', 'bi-bar-chart'],
     'stats'      => ['Relatórios', 'bi-graph-up'],
+    'almanaque'  => ['Almanaque', 'bi-book'],
   ];
 
   // ========= HEAD =========

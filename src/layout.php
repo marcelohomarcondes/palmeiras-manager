@@ -33,8 +33,9 @@ function render_header(string $title): void {
     'transfers'  => ['Transferências', 'bi-arrow-left-right'],
     'injuries'   => ['Lesões', 'bi-bandaid'],
     'trophies'   => ['Troféus', 'bi-trophy'],
-    'opponents'  => ['Vs Adversários', 'bi-bar-chart'],
+    #'opponents'  => ['Vs Adversários', 'bi-bar-chart'],
     'stats'      => ['Relatórios', 'bi-graph-up'],
+    'almanaque'  => ['Almanaque', 'bi-book'],
   ];
 
   // ========= HEAD =========
@@ -346,6 +347,23 @@ select[data-pro-select="1"] {
   visibility: hidden;
   position: absolute;
   pointer-events: none;
+}
+
+/* Ícones do Almanaque */
+.icon-svg{
+width:40px;
+height:40px;
+margin-bottom:12px;
+}
+
+/* tema claro */
+[data-theme="light"] .icon-svg{
+filter: brightness(0);
+}
+
+/* tema escuro */
+[data-theme="dark"] .icon-svg{
+filter: brightness(0) invert(1);
 }
 </style>';
 

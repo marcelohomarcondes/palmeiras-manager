@@ -1,0 +1,125 @@
+Listagem de caminhos de pasta para o volume NVME-4TB
+O número de série do volume é 6685-499C
+D:.
+¦   .gitignore
+¦   app.sqlite
+¦   app.sqlite.BAK
+¦   database.sqlite
+¦   database_backup.sqlite
+¦   estrutura_projeto.txt
+¦   scan_db_writes.ps1
+¦   schema_sqlite3.txt
+¦   update_github.bat
+¦   
++---data
+¦       app.sqlite
+¦       app.sqlite.bak
+¦       app.sqlite_bkp
+¦       
++---database
+¦   +---migrations
+¦           20260216_add_players_club.sql
+¦           
++---logs
+¦       app.log
+¦       
++---public
+¦   ¦   index.php
+¦   ¦   index.php.bak_20260216_002845
+¦   ¦   index.php.bak_20260216_003026
+¦   ¦   index.php.bak_20260216_003252
+¦   ¦   index.php.bak_20260216_003410
+¦   ¦   index.php_bkp_20260303_01
+¦   ¦   index.php_bkp_20260303_02
+¦   ¦   
+¦   +---assets
+¦   ¦   ¦   escudos-inst_3.png
+¦   ¦   ¦   player.svg
+¦   ¦   ¦   referee.svg
+¦   ¦   ¦   shield.svg
+¦   ¦   ¦   stadium.svg
+¦   ¦   ¦   timeline.svg
+¦   ¦   ¦   trophy.svg
+¦   ¦   ¦   
+¦   ¦   +---trophies
+¦   ¦           brasileiro.png
+¦   ¦           copa-do-brasil.png
+¦   ¦           intercontinental.png
+¦   ¦           libertadores.png
+¦   ¦           mundial-de-clubes.png
+¦   ¦           paulista.png
+¦   ¦           recopa.png
+¦   ¦           sul-americana.png
+¦   ¦           supercopa.png
+¦   ¦           
+¦   +---vendor
+¦       +---choices
+¦               choices.min.css
+¦               choices.min.js
+¦               
++---scan_output
+¦       db_scan_20260217-124226.txt
+¦       
++---src
+    ¦   add_transfers_player_id.php
+    ¦   bootstrap.php
+    ¦   check_matches_cols.php
+    ¦   check_schema.php
+    ¦   create_views.php
+    ¦   db.php
+    ¦   fix_players_timestamps.php
+    ¦   fix_transfers_value_integer.php
+    ¦   layout.php
+    ¦   layout.php_bkp_20260303_01
+    ¦   migrate.php
+    ¦   migrate_v2.php
+    ¦   rebuild_all_views.php
+    ¦   rebuild_pm_views.php
+    ¦   rebuild_views.php
+    ¦   
+    +---logs
+    ¦       match_debug.log
+    ¦       
+    +---pages
+        ¦   almanaque.php
+        ¦   create_match.php
+        ¦   crias.php
+        ¦   dashboard.php
+        ¦   edit_match.php
+        ¦   injuries.php
+        ¦   match.php
+        ¦   match.php.bak_20260215_234131
+        ¦   match.php.bak_20260215_234407
+        ¦   match.php.bak_20260215_234618
+        ¦   match.php.bak_20260216_003713
+        ¦   matches.php
+        ¦   matches.php.bak_20260215_234131
+        ¦   matches.php.bak_20260215_234407
+        ¦   matches.php.bak_20260216_002351
+        ¦   opponents.php
+        ¦   opponents.php.bak_20260216_001906
+        ¦   players.php
+        ¦   reports.php
+        ¦   stats.php
+        ¦   stats.php.bak_20260216_001906
+        ¦   templates.php
+        ¦   transfers.php
+        ¦   trophies.php
+        ¦   vs_adversarios.php
+        ¦   
+        +---paginas_bkp
+                crias.php_bkp_20260219_01
+                edit_match.php_bkp_20260303_01
+                match.php_bkp_20260303_01
+                match.php_bkp_20260303_02
+                match.php_bkp_20260303_03
+                matches.php_bkp_20260226_01
+                matches.php_bkp_20260303_01
+                players.php_bkp_20260303_01
+                players.php_bkp_20260303_02
+                players.php_bkp_20260305_01
+                stats.php_bkp_20260304_01
+                stats.php_bkp_20260309_01
+                transfers.php_bkp_20260302_01
+                transfers.php_bkp_20260303_01
+                
