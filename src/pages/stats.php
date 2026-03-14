@@ -812,7 +812,7 @@ foreach ($competitionOptions as $opt) {
 echo '        </select>';
 echo '      </div>';
 echo '      <div class="col-12 col-md-2 d-grid">';
-echo '        <button class="btn btn-success" type="submit">Aplicar</button>';
+echo '        <button class="btn btn-primary" type="submit">Aplicar</button>';
 echo '      </div>';
 echo '    </div>';
 echo '    <div class="text-muted mt-2">Clube: <b>'.h($club).'</b> • Partidas consideradas: <b>'.(int)count($matches).'</b></div>';
@@ -1392,3 +1392,7 @@ document.addEventListener('DOMContentLoaded', () => {
 echo '</script>';
 
 render_footer();
+
+
+
+

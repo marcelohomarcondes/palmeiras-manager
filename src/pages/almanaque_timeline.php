@@ -380,7 +380,7 @@ render_header('Linha do Tempo');
         <h2 class="mb-1">Linha do Tempo</h2>
         <div class="text-muted">Histórico do clube separado por décadas e anos.</div>
     </div>
-    <a href="/?page=almanaque" class="btn btn-outline-secondary">Voltar</a>
+    <a href="/?page=almanaque" class="btn btn-secondary">Voltar</a>
 </div>
 
 <?php if (!$timeline): ?>
@@ -521,7 +521,7 @@ render_header('Linha do Tempo');
                                                                             </span>
                                                                         </td>
                                                                         <td class="text-end">
-                                                                            <a href="/?page=match&id=<?= (int)$m['id'] ?>" class="btn btn-sm btn-outline-primary">Abrir</a>
+                                                                            <a href="/?page=match&id=<?= (int)$m['id'] ?>" class="btn btn-sm btn-primary">Abrir</a>
                                                                         </td>
                                                                     </tr>
                                                                 <?php endforeach; ?>
@@ -544,3 +544,6 @@ render_header('Linha do Tempo');
 <?php endif; ?>
 
 <?php render_footer(); ?>
+
+
+

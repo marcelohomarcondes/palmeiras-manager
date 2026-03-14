@@ -636,7 +636,7 @@ if ($editing) {
   echo '<form method="post" onsubmit="return confirm(\'Excluir esta transferência?\');">';
   echo '<input type="hidden" name="action" value="delete">';
   echo '<input type="hidden" name="id" value="' . (int)$editId . '">';
-  echo '<button class="btn btn-danger w-100" type="submit">Excluir</button>';
+  echo '<button class="btn w-100 btn-danger" type="submit">Excluir</button>';
   echo '</form>';
   echo '</div>';
 }
@@ -932,3 +932,7 @@ echo '</div>'; // row
 </script>
 <?php
 render_footer();
+
+
+
+

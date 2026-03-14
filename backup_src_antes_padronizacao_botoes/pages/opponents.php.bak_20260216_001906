@@ -1,0 +1,117 @@
+<?php
+declare(strict_types=1);
+$pdo = db();
+
+$season = trim((string)($_GET['season'] ?? ''));
+$competition = trim((string)($_GET['competition'] ?? ''));
+
+$where = "WHERE opponent IS NOT NULL AND gf IS NOT NULL AND ga IS NOT NULL";
+$params = [];
+
+if ($season !== '') { $where .= " AND season = ?"; $params[] = $season; }
+if ($competition !== '') { $where .= " AND competition = ?"; $params[] = $competition; }
+
+$rows = q($pdo, "
+  SELECT
+    opponent,
+    COUNT(*) AS games,
+    SUM(CASE WHEN result='W' THEN 1 ELSE 0 END) AS wins,
+    SUM(CASE WHEN result='D' THEN 1 ELSE 0 END) AS draws,
+    SUM(CASE WHEN result='L' THEN 1 ELSE 0 END) AS losses,
+    SUM(gf) AS gf,
+    SUM(ga) AS ga
+  FROM v_pal_matches
+  $where
+  GROUP BY opponent
+  ORDER BY games DESC, (SUM(gf)-SUM(ga)) DESC, opponent ASC
+", $params)->fetchAll();
+
+$seasons = q($pdo, "SELECT DISTINCT season FROM matches ORDER BY season DESC")->fetchAll();
+$comps = q($pdo, "SELECT DISTINCT competition FROM matches ORDER BY competition ASC")->fetchAll();
+
+render_header('Consolidado vs Adversários');
+
+echo '<div class="card card-soft p-3 mb-3">';
+echo '<div class="fw-bold mb-2">Aproveitamento por adversário</div>';
+
+echo '<form method="get" class="row g-2 align-items-end">';
+echo '<input type="hidden" name="page" value="opponents">';
+echo '<div class="col-md-3"><label class="form-label">Temporada</label><select class="form-select" name="season"><option value="">(todas)</option>';
+foreach ($seasons as $s) {
+  $v = (string)$s['season'];
+  $sel = ($season === $v) ? 'selected' : '';
+  echo '<option value="' . h($v) . '" ' . $sel . '>' . h($v) . '</option>';
+}
+echo '</select></div>';
+
+echo '<div class="col-md-6"><label class="form-label">Campeonato</label><select class="form-select" name="competition"><option value="">(todos)</option>';
+foreach ($comps as $c) {
+  $v = (string)$c['competition'];
+  $sel = ($competition === $v) ? 'selected' : '';
+  echo '<option value="' . h($v) . '" ' . $sel . '>' . h($v) . '</option>';
+}
+echo '</select></div>';
+
+echo '<div class="col-md-3"><button class="btn btn-success w-100">Filtrar</button></div>';
+echo '</form>';
+echo '</div>';
+
+echo '<div class="card card-soft p-3">';
+echo '<div class="table-responsive"><table class="table table-sm align-middle mb-0">';
+echo '<thead><tr>
+  <th>Adversário</th><th class="text-end">J</th><th class="text-end">V</th><th class="text-end">E</th><th class="text-end">D</th>
+  <th class="text-end">GP</th><th class="text-end">GC</th><th class="text-end">SG</th><th class="text-end">Aprov.</th>
+</tr></thead><tbody>';
+
+$total = ['games'=>0,'wins'=>0,'draws'=>0,'losses'=>0,'gf'=>0,'ga'=>0];
+
+foreach ($rows as $r) {
+  $games = (int)$r['games'];
+  $wins = (int)$r['wins'];
+  $draws = (int)$r['draws'];
+  $losses = (int)$r['losses'];
+  $gf = (int)$r['gf'];
+  $ga = (int)$r['ga'];
+  $sg = $gf - $ga;
+  $points = ($wins*3) + $draws;
+  $pct = $games > 0 ? ($points / ($games*3)) * 100 : 0;
+
+  $total['games'] += $games;
+  $total['wins'] += $wins;
+  $total['draws'] += $draws;
+  $total['losses'] += $losses;
+  $total['gf'] += $gf;
+  $total['ga'] += $ga;
+
+  echo '<tr>';
+  echo '<td>' . h($r['opponent']) . '</td>';
+  echo '<td class="text-end">' . $games . '</td>';
+  echo '<td class="text-end">' . $wins . '</td>';
+  echo '<td class="text-end">' . $draws . '</td>';
+  echo '<td class="text-end">' . $losses . '</td>';
+  echo '<td class="text-end">' . $gf . '</td>';
+  echo '<td class="text-end">' . $ga . '</td>';
+  echo '<td class="text-end">' . $sg . '</td>';
+  echo '<td class="text-end">' . number_format($pct, 1, ',', '.') . '%</td>';
+  echo '</tr>';
+}
+
+$tg = $total['games'];
+$tp = (($total['wins']*3) + $total['draws']);
+$tpct = $tg > 0 ? ($tp/($tg*3))*100 : 0;
+
+echo '</tbody><tfoot><tr class="table-light fw-bold">';
+echo '<td>Total</td>';
+echo '<td class="text-end">' . $total['games'] . '</td>';
+echo '<td class="text-end">' . $total['wins'] . '</td>';
+echo '<td class="text-end">' . $total['draws'] . '</td>';
+echo '<td class="text-end">' . $total['losses'] . '</td>';
+echo '<td class="text-end">' . $total['gf'] . '</td>';
+echo '<td class="text-end">' . $total['ga'] . '</td>';
+echo '<td class="text-end">' . ($total['gf'] - $total['ga']) . '</td>';
+echo '<td class="text-end">' . number_format($tpct, 1, ',', '.') . '%</td>';
+echo '</tr></tfoot>';
+
+echo '</table></div></div>';
+
+render_footer();

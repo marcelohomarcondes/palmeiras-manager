@@ -134,7 +134,7 @@ if ($opponent !== '') {
   echo '    <h3 class="mb-0">' . h($opponent) . '</h3>';
   echo '  </div>';
   echo '  <div>';
-  echo '    <a class="btn btn-outline-secondary" href="' . h(alm_build_url([
+  echo '    <a class="btn btn-secondary" href="' . h(alm_build_url([
             'opponent' => null,
             'sort'     => $sort,
             'dir'      => $dir,
@@ -168,10 +168,10 @@ if ($opponent !== '') {
   echo '        </select>';
   echo '      </div>';
   echo '      <div class="col-12 col-md-1 d-grid">';
-  echo '        <button class="btn btn-success" type="submit">Aplicar</button>';
+  echo '        <button class="btn btn-primary" type="submit">Aplicar</button>';
   echo '      </div>';
   echo '      <div class="col-12 col-md-1 d-grid">';
-  echo '        <a class="btn btn-outline-secondary" href="' . h(alm_build_url([
+  echo '        <a class="btn btn-secondary" href="' . h(alm_build_url([
             'competition' => null,
             'season'      => null,
           ])) . '">Limpar</a>';
@@ -264,7 +264,7 @@ if ($opponent !== '') {
     echo '        <td class="text-end">' . (int)$m['gf'] . '</td>';
     echo '        <td class="text-end">' . (int)$m['ga'] . '</td>';
     echo '        <td class="text-center">' . $resultado . '</td>';
-    echo '        <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="index.php?page=match&id=' . (int)$m['id'] . '">Abrir</a></td>';
+    echo '        <td class="text-end"><a class="btn btn-sm btn-primary" href="index.php?page=match&id=' . (int)$m['id'] . '">Abrir</a></td>';
     echo '      </tr>';
   }
 
@@ -330,10 +330,10 @@ foreach ($competitionOptions as $opt) {
 echo '        </select>';
 echo '      </div>';
 echo '      <div class="col-12 col-md-1 d-grid">';
-echo '        <button class="btn btn-success" type="submit">Aplicar</button>';
+echo '        <button class="btn btn-primary" type="submit">Aplicar</button>';
 echo '      </div>';
 echo '      <div class="col-12 col-md-1 d-grid">';
-echo '        <a class="btn btn-outline-secondary" href="' . h(alm_build_url([
+echo '        <a class="btn btn-secondary" href="' . h(alm_build_url([
           'q'           => null,
           'competition' => null,
           'season'      => null,
@@ -445,3 +445,7 @@ echo '  </div>';
 echo '</div>';
 
 render_footer();
+
+
+
+

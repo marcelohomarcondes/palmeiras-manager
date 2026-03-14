@@ -60,8 +60,8 @@ echo '<div><label class="form-label">Tempo de recuperação</label><input class=
 echo '<div><label class="form-label">Data de retorno (opcional)</label><input class="form-control" type="date" name="return_date" value="' . h((string)($edit['return_date'] ?? '')) . '"></div>';
 echo '<div><label class="form-label">Notas</label><textarea class="form-control" rows="3" name="notes">' . h($edit['notes'] ?? '') . '</textarea></div>';
 
-echo '<button class="btn btn-success">Salvar</button>';
-if ($edit) echo '<a class="btn btn-outline-secondary" href="/?page=injuries">Cancelar</a>';
+echo '<button class="btn btn-primary">Salvar</button>';
+if ($edit) echo '<a class="btn btn-secondary" href="/?page=injuries">Cancelar</a>';
 echo '</form>';
 echo '</div></div>';
 
@@ -79,8 +79,8 @@ foreach ($rows as $r) {
   echo '<td>' . h($r['recovery_time']) . '</td>';
   echo '<td>' . h((string)($r['return_date'] ?? '')) . '</td>';
   echo '<td class="text-end">';
-  echo '<a class="btn btn-sm btn-outline-primary" href="/?page=injuries&edit=' . (int)$r['id'] . '">Editar</a> ';
-  echo '<a class="btn btn-sm btn-outline-danger" href="/?page=injuries&del=' . (int)$r['id'] . '" onclick="return confirm(\'Excluir?\')">Excluir</a>';
+  echo '<a class="btn btn-sm btn-primary" href="/?page=injuries&edit=' . (int)$r['id'] . '">Editar</a> ';
+  echo '<a class="btn btn-sm btn-danger" href="/?page=injuries&del=' . (int)$r['id'] . '" onclick="return confirm(\'Excluir?\')">Excluir</a>';
   echo '</td>';
   echo '</tr>';
 }
@@ -89,6 +89,11 @@ echo '</div></div>';
 echo '</div>';
 
 render_footer();
+
+
+
+
+
 
 
 

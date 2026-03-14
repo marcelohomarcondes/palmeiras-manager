@@ -1,0 +1,241 @@
+<?php
+declare(strict_types=1);
+$pdo = db();
+
+$season = trim((string)($_GET['season'] ?? ''));
+$competition = trim((string)($_GET['competition'] ?? ''));
+
+$where = "WHERE opponent IS NOT NULL AND gf IS NOT NULL AND ga IS NOT NULL";
+$params = [];
+if ($season !== '') { $where .= " AND season = ?"; $params[] = $season; }
+if ($competition !== '') { $where .= " AND competition = ?"; $params[] = $competition; }
+
+$seasons = q($pdo, "SELECT DISTINCT season FROM matches ORDER BY season DESC")->fetchAll();
+$comps = q($pdo, "SELECT DISTINCT competition FROM matches ORDER BY competition ASC")->fetchAll();
+
+function fetch_all(PDO $pdo, string $sql, array $params = []): array {
+  return q($pdo, $sql, $params)->fetchAll();
+}
+
+function compute_streaks(array $matches): array {
+  $maxUnbeaten = ['len'=>0,'start'=>null,'end'=>null];
+  $maxWinless  = ['len'=>0,'start'=>null,'end'=>null];
+  $curU = ['len'=>0,'start'=>null,'end'=>null];
+  $curW = ['len'=>0,'start'=>null,'end'=>null];
+
+  foreach ($matches as $m) {
+    $res = (string)$m['result'];
+
+    if ($res !== 'L') {
+      if ($curU['len'] === 0) $curU['start'] = $m;
+      $curU['len']++; $curU['end'] = $m;
+    } else {
+      if ($curU['len'] > $maxUnbeaten['len']) $maxUnbeaten = $curU;
+      $curU = ['len'=>0,'start'=>null,'end'=>null];
+    }
+
+    if ($res !== 'W') {
+      if ($curW['len'] === 0) $curW['start'] = $m;
+      $curW['len']++; $curW['end'] = $m;
+    } else {
+      if ($curW['len'] > $maxWinless['len']) $maxWinless = $curW;
+      $curW = ['len'=>0,'start'=>null,'end'=>null];
+    }
+  }
+
+  if ($curU['len'] > $maxUnbeaten['len']) $maxUnbeaten = $curU;
+  if ($curW['len'] > $maxWinless['len']) $maxWinless = $curW;
+
+  return [$maxUnbeaten, $maxWinless];
+}
+
+function render_breakdown(string $title, array $rows): void {
+  echo '<div class="card card-soft p-3 mb-3">';
+  echo '<div class="fw-bold mb-2">' . h($title) . '</div>';
+  echo '<div class="table-responsive"><table class="table table-sm align-middle mb-0">';
+  echo '<thead><tr><th>Chave</th><th class="text-end">J</th><th class="text-end">V</th><th class="text-end">E</th><th class="text-end">D</th><th class="text-end">GP</th><th class="text-end">GC</th><th class="text-end">SG</th><th class="text-end">Aprov.</th></tr></thead><tbody>';
+  foreach ($rows as $r) {
+    $games = (int)$r['games']; $wins=(int)$r['wins']; $draws=(int)$r['draws']; $losses=(int)$r['losses'];
+    $gf=(int)$r['gf']; $ga=(int)$r['ga']; $sg=$gf-$ga;
+    $pts = ($wins*3)+$draws; $pct = $games>0 ? ($pts/($games*3))*100 : 0;
+    echo '<tr>';
+    echo '<td>' . h((string)$r['label']) . '</td>';
+    echo '<td class="text-end">' . $games . '</td>';
+    echo '<td class="text-end">' . $wins . '</td>';
+    echo '<td class="text-end">' . $draws . '</td>';
+    echo '<td class="text-end">' . $losses . '</td>';
+    echo '<td class="text-end">' . $gf . '</td>';
+    echo '<td class="text-end">' . $ga . '</td>';
+    echo '<td class="text-end">' . $sg . '</td>';
+    echo '<td class="text-end">' . number_format($pct, 1, ',', '.') . '%</td>';
+    echo '</tr>';
+  }
+  echo '</tbody></table></div></div>';
+}
+
+render_header('Relatórios');
+
+echo '<div class="card card-soft p-3 mb-3">';
+echo '<div class="fw-bold mb-2">Filtros</div>';
+echo '<form method="get" class="row g-2 align-items-end">';
+echo '<input type="hidden" name="page" value="stats">';
+echo '<div class="col-md-3"><label class="form-label">Temporada</label><select class="form-select" name="season"><option value="">(todas)</option>';
+foreach ($seasons as $s) { $v=(string)$s['season']; $sel=($season===$v)?'selected':''; echo '<option value="'.h($v).'" '.$sel.'>'.h($v).'</option>'; }
+echo '</select></div>';
+echo '<div class="col-md-7"><label class="form-label">Campeonato</label><select class="form-select" name="competition"><option value="">(todos)</option>';
+foreach ($comps as $c) { $v=(string)$c['competition']; $sel=($competition===$v)?'selected':''; echo '<option value="'.h($v).'" '.$sel.'>'.h($v).'</option>'; }
+echo '</select></div>';
+echo '<div class="col-md-2"><button class="btn btn-success w-100">Aplicar</button></div>';
+echo '</form></div>';
+
+# atletas com mais jogos
+$pParams = [];
+if ($season !== '') $pParams[] = $season;
+if ($competition !== '') $pParams[] = $competition;
+
+$mostGames = fetch_all($pdo, "
+  SELECT player_name,
+         COUNT(*) AS games,
+         SUM(CASE WHEN role='STARTER' THEN 1 ELSE 0 END) AS as_starter,
+         SUM(CASE WHEN role='BENCH' THEN 1 ELSE 0 END) AS as_bench,
+         SUM(CASE WHEN entered=1 THEN 1 ELSE 0 END) AS entered
+  FROM v_player_match_stats
+  WHERE club_name='" . app_club() . "'
+" . ($season !== '' ? " AND season=?" : "") . ($competition !== '' ? " AND competition=?" : "") . "
+  GROUP BY player_name
+  ORDER BY games DESC, as_starter DESC, player_name ASC
+  LIMIT 30
+", $pParams);
+
+echo '<div class="card card-soft p-3 mb-3">';
+echo '<div class="fw-bold mb-2">Atletas com mais jogos</div>';
+echo '<div class="table-responsive"><table class="table table-sm align-middle mb-0">';
+echo '<thead><tr><th>Atleta</th><th class="text-end">J</th><th class="text-end">Titular</th><th class="text-end">Banco</th><th class="text-end">Entrou</th></tr></thead><tbody>';
+foreach ($mostGames as $r) {
+  echo '<tr><td>' . h($r['player_name']) . '</td><td class="text-end">' . (int)$r['games'] . '</td><td class="text-end">' . (int)$r['as_starter'] . '</td><td class="text-end">' . (int)$r['as_bench'] . '</td><td class="text-end">' . (int)$r['entered'] . '</td></tr>';
+}
+echo '</tbody></table></div></div>';
+
+# artilheiros / assistentes
+$scorers = fetch_all($pdo, "
+  SELECT player_name, SUM(goals_for) AS goals
+  FROM v_player_match_stats
+  WHERE club_name='" . app_club() . "'
+" . ($season !== '' ? " AND season=?" : "") . ($competition !== '' ? " AND competition=?" : "") . "
+  GROUP BY player_name
+  HAVING SUM(goals_for) > 0
+  ORDER BY goals DESC, player_name ASC
+  LIMIT 20
+", $pParams);
+
+$assists = fetch_all($pdo, "
+  SELECT player_name, SUM(assists) AS assists
+  FROM v_player_match_stats
+  WHERE club_name='" . app_club() . "'
+" . ($season !== '' ? " AND season=?" : "") . ($competition !== '' ? " AND competition=?" : "") . "
+  GROUP BY player_name
+  HAVING SUM(assists) > 0
+  ORDER BY assists DESC, player_name ASC
+  LIMIT 20
+", $pParams);
+
+echo '<div class="row g-3 mb-3">';
+echo '<div class="col-lg-6"><div class="card card-soft p-3"><div class="fw-bold mb-2">Maiores artilheiros</div>';
+echo '<div class="table-responsive"><table class="table table-sm mb-0"><thead><tr><th>Atleta</th><th class="text-end">Gols</th></tr></thead><tbody>';
+foreach ($scorers as $r) echo '<tr><td>' . h($r['player_name']) . '</td><td class="text-end">' . (int)$r['goals'] . '</td></tr>';
+echo '</tbody></table></div></div></div>';
+
+echo '<div class="col-lg-6"><div class="card card-soft p-3"><div class="fw-bold mb-2">Maiores assistentes</div>';
+echo '<div class="table-responsive"><table class="table table-sm mb-0"><thead><tr><th>Atleta</th><th class="text-end">Assist.</th></tr></thead><tbody>';
+foreach ($assists as $r) echo '<tr><td>' . h($r['player_name']) . '</td><td class="text-end">' . (int)$r['assists'] . '</td></tr>';
+echo '</tbody></table></div></div></div>';
+echo '</div>';
+
+# sequências (invicta / sem vitória)
+$matchesAsc = fetch_all($pdo, "
+  SELECT match_id, match_date, opponent, gf, ga, result
+  FROM v_pal_matches
+  $where
+  ORDER BY match_date ASC, match_id ASC
+", $params);
+
+[$maxUnbeaten, $maxWinless] = compute_streaks($matchesAsc);
+
+echo '<div class="card card-soft p-3 mb-3">';
+echo '<div class="fw-bold mb-2">Sequências</div>';
+echo '<div class="row g-2">';
+echo '<div class="col-lg-6"><div class="border rounded p-3 h-100"><div class="fw-bold">Maior sequência invicta</div>';
+if ($maxUnbeaten['len'] > 0) {
+  $s=$maxUnbeaten['start']; $e=$maxUnbeaten['end'];
+  echo '<div class="fs-4 fw-bold">' . (int)$maxUnbeaten['len'] . ' jogos</div>';
+  echo '<div class="text-muted small">De ' . h($s['match_date']) . ' até ' . h($e['match_date']) . '</div>';
+} else echo '<div class="text-muted">Sem dados</div>';
+echo '</div></div>';
+
+echo '<div class="col-lg-6"><div class="border rounded p-3 h-100"><div class="fw-bold">Maior sequência sem vitória</div>';
+if ($maxWinless['len'] > 0) {
+  $s=$maxWinless['start']; $e=$maxWinless['end'];
+  echo '<div class="fs-4 fw-bold">' . (int)$maxWinless['len'] . ' jogos</div>';
+  echo '<div class="text-muted small">De ' . h($s['match_date']) . ' até ' . h($e['match_date']) . '</div>';
+} else echo '<div class="text-muted">Sem dados</div>';
+echo '</div></div>';
+echo '</div></div>';
+
+# top 10 goleadas
+$goleadas = fetch_all($pdo, "
+  SELECT match_date, opponent, gf, ga, (gf-ga) AS sg, competition
+  FROM v_pal_matches
+  $where AND result='W'
+  ORDER BY (gf-ga) DESC, gf DESC, match_date DESC
+  LIMIT 10
+", $params);
+
+echo '<div class="card card-soft p-3 mb-3">';
+echo '<div class="fw-bold mb-2">Top 10 goleadas</div>';
+echo '<div class="table-responsive"><table class="table table-sm align-middle mb-0">';
+echo '<thead><tr><th>Data</th><th>Competição</th><th>Adversário</th><th class="text-end">Placar</th><th class="text-end">SG</th></tr></thead><tbody>';
+foreach ($goleadas as $r) {
+  echo '<tr><td>' . h($r['match_date']) . '</td><td>' . h($r['competition']) . '</td><td>' . h($r['opponent']) . '</td><td class="text-end fw-bold">' . (int)$r['gf'] . ' - ' . (int)$r['ga'] . '</td><td class="text-end">' . (int)$r['sg'] . '</td></tr>';
+}
+echo '</tbody></table></div></div>';
+
+# breakdowns (estádio/árbitro/uniforme/mando/clima)
+$mk = function(string $col) use ($pdo, $where, $params) {
+  return fetch_all($pdo, "
+    SELECT COALESCE(NULLIF(TRIM($col),''),'(não informado)') AS label,
+           COUNT(*) AS games,
+           SUM(CASE WHEN result='W' THEN 1 ELSE 0 END) AS wins,
+           SUM(CASE WHEN result='D' THEN 1 ELSE 0 END) AS draws,
+           SUM(CASE WHEN result='L' THEN 1 ELSE 0 END) AS losses,
+           SUM(gf) AS gf,
+           SUM(ga) AS ga
+    FROM v_pal_matches
+    $where
+    GROUP BY COALESCE(NULLIF(TRIM($col),''),'(não informado)')
+    HAVING COUNT(*) >= 2
+    ORDER BY games DESC, (SUM(gf)-SUM(ga)) DESC, label ASC
+    LIMIT 30
+  ", $params);
+};
+
+render_breakdown('Aproveitamento em estádios (mín. 2 jogos)', $mk('stadium'));
+render_breakdown('Aproveitamento com árbitros (mín. 2 jogos)', $mk('referee'));
+render_breakdown('Aproveitamento com uniformes (mín. 2 jogos)', $mk('kit_used'));
+
+render_breakdown('Aproveitamento mandante/visitante', fetch_all($pdo, "
+  SELECT COALESCE(venue_side,'(n/a)') AS label,
+         COUNT(*) AS games,
+         SUM(CASE WHEN result='W' THEN 1 ELSE 0 END) AS wins,
+         SUM(CASE WHEN result='D' THEN 1 ELSE 0 END) AS draws,
+         SUM(CASE WHEN result='L' THEN 1 ELSE 0 END) AS losses,
+         SUM(gf) AS gf,
+         SUM(ga) AS ga
+  FROM v_pal_matches
+  $where
+  GROUP BY venue_side
+  ORDER BY label ASC
+", $params));
+
+render_breakdown('Aproveitamento por clima (mín. 2 jogos)', $mk('weather'));
+
+render_footer();

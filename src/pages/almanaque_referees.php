@@ -375,7 +375,7 @@ if ($referee !== '') {
     echo '<h4 class="mb-1">' . h($referee) . '</h4>';
     echo '<div class="text-muted">Resumo detalhado do árbitro</div>';
     echo '</div>';
-    echo '<a class="btn btn-outline-secondary btn-sm" href="' . h(alm_ref_build_url(['referee' => null, 'season' => null, 'competition' => null])) . '">Voltar ao consolidado</a>';
+    echo '<a class="btn btn-secondary btn-sm" href="' . h(alm_ref_build_url(['referee' => null, 'season' => null, 'competition' => null])) . '">Voltar ao consolidado</a>';
     echo '</div>';
     echo '</div></div>';
 
@@ -407,7 +407,7 @@ if ($referee !== '') {
     echo '</div>';
 
     echo '<div class="col-auto"><button class="btn btn-primary" type="submit">Aplicar</button></div>';
-    echo '<div class="col-auto"><a class="btn btn-outline-secondary" href="' . h(alm_ref_build_url(['season' => null, 'competition' => null])) . '">Limpar</a></div>';
+    echo '<div class="col-auto"><a class="btn btn-secondary" href="' . h(alm_ref_build_url(['season' => null, 'competition' => null])) . '">Limpar</a></div>';
     echo '</form>';
     echo '</div></div>';
 
@@ -490,7 +490,7 @@ if ($referee !== '') {
             echo '<td>' . h($resultado) . '</td>';
             echo '<td>' . (int)$m['yellow'] . '</td>';
             echo '<td>' . (int)$m['red'] . '</td>';
-            echo '<td><a class="btn btn-sm btn-outline-primary" href="index.php?page=match&id=' . (int)$m['id'] . '">Abrir</a></td>';
+            echo '<td><a class="btn btn-sm btn-primary" href="index.php?page=match&id=' . (int)$m['id'] . '">Abrir</a></td>';
             echo '</tr>';
         }
 
@@ -659,7 +659,7 @@ echo '</select>';
 echo '</div>';
 
 echo '<div class="col-auto"><button class="btn btn-primary" type="submit">Aplicar</button></div>';
-echo '<div class="col-auto"><a class="btn btn-outline-secondary" href="' . h(alm_ref_build_url(['q' => null, 'season' => null, 'competition' => null, 'sort' => null, 'dir' => null])) . '">Limpar</a></div>';
+echo '<div class="col-auto"><a class="btn btn-secondary" href="' . h(alm_ref_build_url(['q' => null, 'season' => null, 'competition' => null, 'sort' => null, 'dir' => null])) . '">Limpar</a></div>';
 
 echo '</form>';
 echo '</div></div>';
@@ -712,3 +712,7 @@ echo '</div>';
 echo '</div>';
 
 render_footer();
+
+
+
+

@@ -314,8 +314,8 @@ echo '</div>';
 $checked = (!$edit || (int)($edit['is_active'] ?? 1) === 1) ? 'checked' : '';
 echo '<div class="form-check"><input class="form-check-input" type="checkbox" name="is_active" id="act" ' . $checked . '><label class="form-check-label" for="act">Ativo na base</label></div>';
 
-echo '<button class="btn btn-success">Salvar</button>';
-if ($edit) echo '<a class="btn btn-outline-secondary" href="/?page=crias">Cancelar</a>';
+echo '<button class="btn btn-primary">Salvar</button>';
+if ($edit) echo '<a class="btn btn-secondary" href="/?page=crias">Cancelar</a>';
 echo '</form>';
 
 echo '<div class="text-muted small mt-3">Dica: ao promover, o atleta sai da base e entra no elenco profissional.</div>';
@@ -381,16 +381,16 @@ foreach ($rows as $r) {
   echo '<td>' . ((int)$r['is_active'] === 1 ? '<span class="badge text-bg-success">Ativo</span>' : '<span class="badge text-bg-secondary">Inativo</span>') . '</td>';
 
   echo '<td class="text-end">';
-  echo '<a class="btn btn-sm btn-outline-primary" href="/?page=crias&edit=' . $rid . '">Editar</a> ';
-  echo '<a class="btn btn-sm btn-outline-danger" href="/?page=crias&del=' . $rid . '" onclick="return confirm(\'Excluir atleta da base?\')">Excluir</a> ';
+  echo '<a class="btn btn-sm btn-primary" href="/?page=crias&edit=' . $rid . '">Editar</a> ';
+  echo '<a class="btn btn-sm btn-danger" href="/?page=crias&del=' . $rid . '" onclick="return confirm(\'Excluir atleta da base?\')">Excluir</a> ';
 
-  echo '<button type="button" class="btn btn-sm btn-outline-success js-promote"
+  echo '<button type="button" class="btn btn-sm js-promote btn-success"
               data-id="' . $rid . '"
               data-name="' . h($rname) . '">
           Promover
         </button> ';
 
-  echo '<a class="btn btn-sm btn-outline-warning" href="/?page=crias&dismiss=' . $rid . '" onclick="return confirm(\'Dispensar este atleta da base? Ele irá para a lista de dispensados.\')">Dispensar</a>';
+  echo '<a class="btn btn-sm btn-dispense" href="/?page=crias&dismiss=' . $rid . '" onclick="return confirm(\'Dispensar este atleta da base? Ele irá para a lista de dispensados.\')">Dispensar</a>';
 
   echo '</td>';
   echo '</tr>';
@@ -458,7 +458,7 @@ echo '        </div>
             <div class="form-text">Marque 0 ou mais posições secundárias.</div>
           </div>
 
-          <button class="btn btn-success">Salvar</button>
+          <button class="btn btn-primary">Salvar</button>
         </form>
       </div>
     </div>
@@ -522,4 +522,9 @@ echo '</div></div>'; // col direita
 echo '</div>'; // row
 
 render_footer();
+
+
+
+
+
 

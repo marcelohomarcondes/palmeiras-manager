@@ -406,15 +406,15 @@ function render_section(string $title, array $list, ?string $emptyText = null): 
 
       // Ações
       echo '<td class="text-end text-nowrap">';
-      echo '<a class="btn btn-outline-primary btn-sm" href="/?page=players&edit=' . (int)$r['id'] . '">Editar</a> ';
+      echo '<a class="btn btn-sm btn-primary" href="/?page=players&edit=' . (int)$r['id'] . '">Editar</a> ';
 
       // Aposentar: só se não estiver aposentado já
       $lt = strtoupper(trim((string)($r['last_transfer_type'] ?? '')));
       if ($lt !== 'APOSENTADORIA') {
-        echo '<a class="btn btn-outline-warning btn-sm" href="/?page=players&retire=' . (int)$r['id'] . '" onclick="return confirm(\'Confirmar aposentadoria?\')">Aposentar</a> ';
+        echo '<a class="btn btn-warning btn-sm" href="/?page=players&retire=' . (int)$r['id'] . '" onclick="return confirm(\'Confirmar aposentadoria?\')">Aposentar</a> ';
       }
 
-      echo '<a class="btn btn-outline-danger btn-sm" href="/?page=players&del=' . (int)$r['id'] . '" onclick="return confirm(\'Confirmar exclusão?\')">Excluir</a>';
+      echo '<a class="btn btn-sm btn-danger" href="/?page=players&del=' . (int)$r['id'] . '" onclick="return confirm(\'Confirmar exclusão?\')">Excluir</a>';
       echo '</td>';
 
       echo '</tr>';
@@ -479,3 +479,7 @@ echo '</div>'; // col/list
 echo '</div>'; // row
 
 render_footer();
+
+
+
+

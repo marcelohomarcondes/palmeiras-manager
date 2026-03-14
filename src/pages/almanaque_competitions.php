@@ -160,12 +160,12 @@ echo '              <h2 class="h4 mb-1">Almanaque de Campeonatos</h2>';
 echo '              <p class="text-muted mb-0">Consolidado por competição, detalhamento por temporada e lista de partidas com acesso direto ao jogo.</p>';
 echo '            </div>';
 echo '            <div class="d-flex gap-2">';
-echo '              <a class="btn btn-outline-secondary btn-sm" href="index.php?page=almanaque">Voltar ao almanaque</a>';
+echo '              <a class="btn btn-secondary btn-sm" href="index.php?page=almanaque">Voltar ao almanaque</a>';
 if ($competition !== '') {
-    echo '              <a class="btn btn-outline-secondary btn-sm" href="' . h(alm_comp_build_url(['competition' => null, 'season' => null])) . '">Voltar ao consolidado</a>';
+    echo '              <a class="btn btn-secondary btn-sm" href="' . h(alm_comp_build_url(['competition' => null, 'season' => null])) . '">Voltar ao consolidado</a>';
 }
 if ($competition !== '' && $season !== '') {
-    echo '              <a class="btn btn-outline-secondary btn-sm" href="' . h(alm_comp_build_url(['season' => null])) . '">Voltar às temporadas</a>';
+    echo '              <a class="btn btn-secondary btn-sm" href="' . h(alm_comp_build_url(['season' => null])) . '">Voltar às temporadas</a>';
 }
 echo '            </div>';
 echo '          </div>';
@@ -631,7 +631,7 @@ if ($competition === '') {
             echo '  <td class="text-center">' . (int)$m['gf'] . '</td>';
             echo '  <td class="text-center">' . (int)$m['ga'] . '</td>';
             echo '  <td>' . h(alm_match_result_label((string)$m['result'])) . '</td>';
-            echo '  <td class="text-center"><a class="btn btn-sm btn-outline-primary" href="' . h($matchUrl) . '">Abrir</a></td>';
+            echo '  <td class="text-center"><a class="btn btn-sm btn-primary" href="' . h($matchUrl) . '">Abrir</a></td>';
             echo '</tr>';
         }
 
@@ -654,3 +654,6 @@ if (function_exists('render_footer')) {
 } else {
     render_footer_fallback();
 }
+
+
+

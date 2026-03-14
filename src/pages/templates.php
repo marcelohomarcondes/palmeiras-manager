@@ -211,7 +211,7 @@ echo '<div class="fw-bold mb-2">Criar novo template</div>';
 echo '<form method="post" class="d-flex gap-2 mb-3">';
 echo '<input type="hidden" name="action" value="create_template">';
 echo '<input class="form-control" name="new_template_name" placeholder="ex: 4-2-3-1 Titular">';
-echo '<button class="btn btn-outline-primary">Criar</button>';
+echo '<button class="btn btn-primary">Criar</button>';
 echo '</form>';
 
 if ($tpl) {
@@ -231,13 +231,13 @@ if ($tpl) {
   echo '<div><label class="form-label">Notas</label>';
   echo '<textarea class="form-control" rows="3" name="notes">'.h((string)($tpl['notes'] ?? '')).'</textarea></div>';
 
-  echo '<button class="btn btn-success">Salvar</button>';
+  echo '<button class="btn btn-primary">Salvar</button>';
   echo '</form>';
 
   echo '<form method="post" class="mt-3">';
   echo '<input type="hidden" name="action" value="clear">';
   echo '<input type="hidden" name="template_id" value="'.(int)$tpl['id'].'">';
-  echo '<button class="btn btn-outline-danger" onclick="return confirm(\'Limpar todos os slots?\')">Limpar escalação</button>';
+  echo '<button class="btn btn-danger" onclick="return confirm(\'Limpar todos os slots?\')">Limpar escalação</button>';
   echo '</form>';
 }
 
@@ -297,7 +297,7 @@ echo '<option value=""></option>';
 echo select_options($positions, '');
 echo '</select></div>';
 
-echo '<div class="col-12"><button class="btn btn-outline-primary">Salvar slot</button></div>';
+echo '<div class="col-12"><button class="btn btn-primary">Salvar slot</button></div>';
 echo '</form>';
 
 /* list slots */
@@ -328,5 +328,10 @@ echo '</div></div>'; // right card
 echo '</div>';       // row
 
 render_footer();
+
+
+
+
+
 
 

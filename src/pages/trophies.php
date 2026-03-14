@@ -199,8 +199,8 @@ echo '<div><label class="form-label">Temporada</label><input class="form-control
 echo '<div><label class="form-label">Data (opcional)</label><input class="form-control" type="date" name="achieved_at" value="' . h((string)($edit['achieved_at'] ?? '')) . '"></div>';
 echo '<div><label class="form-label">Notas</label><textarea class="form-control" rows="3" name="notes">' . h($edit['notes'] ?? '') . '</textarea></div>';
 
-echo '<button class="btn btn-success">Salvar</button>';
-if ($edit) echo '<a class="btn btn-outline-secondary" href="/?page=trophies">Cancelar</a>';
+echo '<button class="btn btn-primary">Salvar</button>';
+if ($edit) echo '<a class="btn btn-secondary" href="/?page=trophies">Cancelar</a>';
 echo '</form></div></div>';
 
 // Coluna direita: tabela + filtros + galeria visual
@@ -222,7 +222,7 @@ foreach ($competitions as $c) {
 }
 echo '</select></div>';
 echo '<div class="pb-1">';
-echo '<a class="btn btn-sm btn-outline-secondary" href="/?page=trophies">Limpar</a>';
+echo '<a class="btn btn-sm btn-secondary" href="/?page=trophies">Limpar</a>';
 echo '</div>';
 echo '</form>';
 echo '</div>';
@@ -237,8 +237,8 @@ foreach ($rows as $r) {
   echo '<td>' . h((string)($r['achieved_at'] ?? '')) . '</td>';
   echo '<td class="text-muted">' . h((string)($r['notes'] ?? '')) . '</td>';
   echo '<td class="text-end">';
-  echo '<a class="btn btn-sm btn-outline-primary" href="/?page=trophies&edit=' . (int)$r['id'] . '">Editar</a> ';
-  echo '<a class="btn btn-sm btn-outline-danger" href="/?page=trophies&del=' . (int)$r['id'] . '" onclick="return confirm(\'Excluir?\')">Excluir</a>';
+  echo '<a class="btn btn-sm btn-primary" href="/?page=trophies&edit=' . (int)$r['id'] . '">Editar</a> ';
+  echo '<a class="btn btn-sm btn-danger" href="/?page=trophies&del=' . (int)$r['id'] . '" onclick="return confirm(\'Excluir?\')">Excluir</a>';
   echo '</td>';
   echo '</tr>';
 }
@@ -319,8 +319,8 @@ foreach ($competitions as $c) {
       if ($nt !== '') echo '              <div class="small text-muted">' . h($nt) . '</div>';
       echo '            </div>';
       echo '            <div class="text-end">';
-      echo '              <a class="btn btn-sm btn-outline-primary" href="/?page=trophies&edit=' . (int)$r['id'] . '">Editar</a> ';
-      echo '              <a class="btn btn-sm btn-outline-danger" href="/?page=trophies&del=' . (int)$r['id'] . '" onclick="return confirm(\'Excluir?\')">Excluir</a>';
+      echo '              <a class="btn btn-sm btn-primary" href="/?page=trophies&edit=' . (int)$r['id'] . '">Editar</a> ';
+      echo '              <a class="btn btn-sm btn-danger" href="/?page=trophies&del=' . (int)$r['id'] . '" onclick="return confirm(\'Excluir?\')">Excluir</a>';
       echo '            </div>';
       echo '          </div>';
     }
@@ -329,7 +329,7 @@ foreach ($competitions as $c) {
 
   echo '      </div>';
   echo '      <div class="modal-footer">';
-  echo '        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Fechar</button>';
+  echo '        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>';
   echo '      </div>';
   echo '    </div>';
   echo '  </div>';
@@ -381,7 +381,7 @@ if (!$timeline) {
       if ($it['notes'] !== '') echo '            <div class="small text-muted">' . h($it['notes']) . '</div>';
       echo '          </div>';
       echo '          <div class="text-end">';
-      echo '            <a class="btn btn-sm btn-outline-primary" href="/?page=trophies&edit=' . (int)$it['id'] . '">Editar</a>';
+      echo '            <a class="btn btn-sm btn-primary" href="/?page=trophies&edit=' . (int)$it['id'] . '">Editar</a>';
       echo '          </div>';
       echo '        </div>';
     }
@@ -398,5 +398,10 @@ echo '</div></div>'; // fecha card e col
 echo '</div>'; // fecha row
 
 render_footer();
+
+
+
+
+
 
 

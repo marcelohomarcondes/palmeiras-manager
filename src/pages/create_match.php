@@ -1197,7 +1197,7 @@ foreach ($templates as $t) {
   echo '<option value="'.$tid.'" '.$sel.'>'.h($tn).'</option>';
 }
 echo '</select></div>';
-echo '<button type="submit" name="action" value="apply_template" formnovalidate class="btn btn-outline-light btn-sm">Aplicar</button>';
+echo '<button type="submit" name="action" value="apply_template" formnovalidate class="btn btn-outline-light btn-sm btn-primary">Aplicar</button>';
 echo '</div>';
 
 render_table_create(true, 'starter', $MAX_STARTERS, $positions, $palPlayers, $mvpSelected);
@@ -1222,7 +1222,7 @@ echo '</div></div>';
 echo '</div>';
 
 echo '<div class="text-end mt-3">
-  <button type="submit" class="btn btn-success">Salvar</button>
+  <button type="submit" class="btn btn-primary">Salvar</button>
 </div>';
 
 echo '</form>';
@@ -1354,3 +1354,6 @@ echo '<script>
 </script>';
 
 render_footer();
+
+
+

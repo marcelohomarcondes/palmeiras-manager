@@ -227,11 +227,11 @@ foreach ($seasonLabels as $seasonLabel) {
     echo '<td>' . h($score) . '</td>';
 
     echo '<td class="text-end" style="white-space:nowrap;">';
-    echo '  <a class="btn btn-sm btn-outline-primary" href="/?page=match&id=' . $id . '">Abrir</a> ';
-    echo '  <a class="btn btn-sm btn-outline-warning" href="/?page=edit_match&id=' . $id . '">Editar</a> ';
+    echo '  <a class="btn btn-sm btn-primary" href="/?page=match&id=' . $id . '">Abrir</a> ';
+    echo '  <a class="btn btn-sm btn-primary" href="/?page=edit_match&id=' . $id . '">Editar</a> ';
     echo '  <form method="post" action="/?page=matches&action=delete" style="display:inline-block;" onsubmit="return confirm(\'Excluir esta partida? Essa ação não pode ser desfeita.\')">';
     echo '    <input type="hidden" name="match_id" value="' . $id . '">';
-    echo '    <button class="btn btn-sm btn-outline-danger" type="submit">Excluir</button>';
+    echo '    <button class="btn btn-sm btn-danger" type="submit">Excluir</button>';
     echo '  </form>';
     echo '</td>';
 
@@ -310,3 +310,6 @@ foreach ($seasonLabels as $seasonLabel) {
 
 <?php
 render_footer();
+
+
+

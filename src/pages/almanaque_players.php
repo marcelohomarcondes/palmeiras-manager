@@ -407,7 +407,7 @@ if ($playerId > 0) {
     echo '    <div class="text-muted">Estatísticas consolidadas e partidas efetivamente disputadas.</div>';
     echo '  </div>';
     echo '  <div>';
-    echo '    <a class="btn btn-outline-secondary" href="' . h(alm_players_build_url(['player_id' => null])) . '">Voltar ao consolidado</a>';
+    echo '    <a class="btn btn-secondary" href="' . h(alm_players_build_url(['player_id' => null])) . '">Voltar ao consolidado</a>';
     echo '  </div>';
     echo '</div>';
 
@@ -592,7 +592,7 @@ if ($playerId > 0) {
             echo '        <td>' . (int)$m['assists'] . '</td>';
             echo '        <td>' . (int)$m['yellow_cards'] . '</td>';
             echo '        <td>' . (int)$m['red_cards'] . '</td>';
-            echo '        <td><a class="btn btn-sm btn-outline-primary" href="index.php?page=match&id=' . (int)$m['id'] . '">Abrir</a></td>';
+            echo '        <td><a class="btn btn-sm btn-primary" href="index.php?page=match&id=' . (int)$m['id'] . '">Abrir</a></td>';
             echo '      </tr>';
         }
 
@@ -651,8 +651,8 @@ echo '        </select>';
 echo '      </div>';
 
 echo '      <div class="col-lg-2 d-flex gap-2">';
-echo '        <button type="submit" class="btn btn-primary w-100">Aplicar</button>';
-echo '        <a class="btn btn-outline-secondary w-100" href="index.php?page=almanaque_players">Limpar</a>';
+echo '        <button type="submit" class="btn w-100 btn-primary">Aplicar</button>';
+echo '        <a class="btn w-100 btn-secondary" href="index.php?page=almanaque_players">Limpar</a>';
 echo '      </div>';
 
 echo '    </form>';
@@ -700,7 +700,7 @@ foreach ($rows as $r) {
     echo '        <td>' . (int)$r['red_cards'] . '</td>';
     echo '        <td>' . alm_players_fmt_pct($r['pct']) . '</td>';
     echo '        <td>' . (int)$r['titles'] . '</td>';
-    echo '        <td><a class="btn btn-sm btn-outline-primary" href="' . h(alm_players_build_url([
+    echo '        <td><a class="btn btn-sm btn-primary" href="' . h(alm_players_build_url([
         'player_id' => (int)$r['player_id'],
     ])) . '">Abrir</a></td>';
     echo '      </tr>';
@@ -713,3 +713,6 @@ echo '  </div>';
 echo '</div>';
 
 render_footer();
+
+
+
