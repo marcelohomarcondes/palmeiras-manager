@@ -13,7 +13,9 @@ declare(strict_types=1);
  * - Clique na partida redireciona para match.php?id=...
  */
 
-$club = function_exists('app_club') ? (string)app_club() : 'PALMEIRAS';
+$pdo    = db();
+$userId = require_user_id();
+$club   = function_exists('app_club') ? (string)app_club() : 'PALMEIRAS';
 
 if (!function_exists('table_exists')) {
     function table_exists(PDO $pdo, string $table): bool {
@@ -31,6 +33,16 @@ if (!function_exists('table_columns')) {
             $cols[] = (string)($r['name'] ?? '');
         }
         return $cols;
+    }
+}
+
+if (!function_exists('table_has_user_id')) {
+    function table_has_user_id(PDO $pdo, string $table): bool {
+        static $cache = [];
+        if (!array_key_exists($table, $cache)) {
+            $cache[$table] = in_array('user_id', table_columns($pdo, $table), true);
+        }
+        return $cache[$table];
     }
 }
 
@@ -83,7 +95,11 @@ if (!function_exists('pm_alm_real_participation_sql')) {
      *
      * Não inclui banco não utilizado.
      */
-    function pm_alm_real_participation_sql(string $clubNormExpr): string {
+    function pm_alm_real_participation_sql(string $clubNormExpr, bool $mpHasUserId, bool $msHasUserId, bool $mxHasUserId): string {
+        $mpUser = $mpHasUserId ? " AND mp.user_id = :user_id " : '';
+        $msUser = $msHasUserId ? " AND ms.user_id = :user_id " : '';
+        $mxUser = $mxHasUserId ? " AND mx.user_id = :user_id " : '';
+
         return "
             SELECT DISTINCT
                 mp.match_id,
@@ -92,6 +108,7 @@ if (!function_exists('pm_alm_real_participation_sql')) {
             WHERE mp.player_id IS NOT NULL
               AND UPPER(TRIM(COALESCE(mp.club_name, ''))) = {$clubNormExpr}
               AND UPPER(TRIM(COALESCE(mp.role, ''))) = 'STARTER'
+              {$mpUser}
 
             UNION
 
@@ -102,6 +119,8 @@ if (!function_exists('pm_alm_real_participation_sql')) {
             JOIN matches mx
               ON mx.id = ms.match_id
             WHERE ms.player_in_id IS NOT NULL
+              {$msUser}
+              {$mxUser}
               AND (
                     (UPPER(TRIM(COALESCE(mx.home, ''))) = {$clubNormExpr} AND UPPER(TRIM(COALESCE(ms.side, ''))) = 'HOME')
                  OR (UPPER(TRIM(COALESCE(mx.away, ''))) = {$clubNormExpr} AND UPPER(TRIM(COALESCE(ms.side, ''))) = 'AWAY')
@@ -144,6 +163,13 @@ $orderDir = ($dir === 'asc') ? 'ASC' : 'DESC';
 /* -----------------------------------------------------------------------------
  * Estrutura dinâmica
  * -------------------------------------------------------------------------- */
+$playersHasUserId      = table_has_user_id($pdo, 'players');
+$matchesHasUserId      = table_has_user_id($pdo, 'matches');
+$matchPlayersHasUserId = table_exists($pdo, 'match_players') && table_has_user_id($pdo, 'match_players');
+$matchSubsHasUserId    = table_exists($pdo, 'match_substitutions') && table_has_user_id($pdo, 'match_substitutions');
+$statsHasUserId        = table_exists($pdo, 'match_player_stats') && table_has_user_id($pdo, 'match_player_stats');
+$trophiesHasUserId     = table_exists($pdo, 'trophies') && table_has_user_id($pdo, 'trophies');
+
 $statsCols      = table_exists($pdo, 'match_player_stats') ? table_columns($pdo, 'match_player_stats') : [];
 $trophiesExists = table_exists($pdo, 'trophies');
 $trophiesCols   = $trophiesExists ? table_columns($pdo, 'trophies') : [];
@@ -183,23 +209,35 @@ $redExpr     = $redCol     ? "COALESCE(s.$redCol, 0)" : "0";
 /* -----------------------------------------------------------------------------
  * Opções de filtro
  * -------------------------------------------------------------------------- */
-$st = $pdo->prepare("
+$seasonSql = "
     SELECT DISTINCT TRIM(m.season) AS season
     FROM matches m
     WHERE {$isClubInMatch}
+";
+$seasonParams = [':club' => $club];
+if ($matchesHasUserId) {
+    $seasonSql .= " AND m.user_id = :user_id";
+    $seasonParams[':user_id'] = $userId;
+}
+$seasonSql .= "
       AND TRIM(COALESCE(m.season, '')) <> ''
     ORDER BY CAST(TRIM(m.season) AS INTEGER) DESC, TRIM(m.season) DESC
-");
-$st->execute([':club' => $club]);
+";
+$st = $pdo->prepare($seasonSql);
+$st->execute($seasonParams);
 $seasonOptions = array_map(static fn(array $r): string => (string)$r['season'], $st->fetchAll(PDO::FETCH_ASSOC) ?: []);
 
 $compSql = "
     SELECT DISTINCT TRIM(m.competition) AS competition
     FROM matches m
     WHERE {$isClubInMatch}
-      AND TRIM(COALESCE(m.competition, '')) <> ''
 ";
 $compParams = [':club' => $club];
+if ($matchesHasUserId) {
+    $compSql .= " AND m.user_id = :user_id";
+    $compParams[':user_id'] = $userId;
+}
+$compSql .= " AND TRIM(COALESCE(m.competition, '')) <> ''";
 if ($season !== '') {
     $compSql .= " AND UPPER(TRIM(COALESCE(m.season, ''))) = UPPER(TRIM(:season))";
     $compParams[':season'] = $season;
@@ -213,7 +251,12 @@ $competitionOptions = array_map(static fn(array $r): string => (string)$r['compe
 /* -----------------------------------------------------------------------------
  * Participação real filtrada
  * -------------------------------------------------------------------------- */
-$realParticipationSql = pm_alm_real_participation_sql($clubNorm);
+$realParticipationSql = pm_alm_real_participation_sql(
+    $clubNorm,
+    $matchPlayersHasUserId,
+    $matchSubsHasUserId,
+    $matchesHasUserId
+);
 
 $filteredParticipationSql = "
     SELECT
@@ -235,6 +278,12 @@ $filteredParticipationSql = "
 ";
 
 $filteredParams = [':club' => $club];
+if ($matchPlayersHasUserId || $matchSubsHasUserId || $matchesHasUserId) {
+    $filteredParams[':user_id'] = $userId;
+}
+if ($matchesHasUserId) {
+    $filteredParticipationSql .= " AND m.user_id = :user_id";
+}
 
 if ($season !== '') {
     $filteredParticipationSql .= " AND UPPER(TRIM(COALESCE(m.season, ''))) = UPPER(TRIM(:season))";
@@ -307,8 +356,14 @@ $sql = "
 ";
 
 $params = $filteredParams;
+if ($statsHasUserId) {
+    $sql .= " AND s.user_id = :user_id";
+}
 
 $whereOuter = [];
+if ($playersHasUserId) {
+    $whereOuter[] = "p.user_id = :user_id";
+}
 if ($qPlayer !== '') {
     $whereOuter[] = "UPPER(TRIM(COALESCE(p.name, ''))) LIKE UPPER(TRIM(:q))";
     $params[':q'] = '%' . $qPlayer . '%';
@@ -345,7 +400,13 @@ if ($trophiesExists && $trophySeasonCol !== null) {
         $seasonsByPlayer[$pid][$ss] = true;
     }
 
-    $allTrophies = q($pdo, "SELECT * FROM trophies")->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $trophySql = "SELECT * FROM trophies";
+    $trophyParams = [];
+    if ($trophiesHasUserId) {
+        $trophySql .= " WHERE user_id = ?";
+        $trophyParams[] = $userId;
+    }
+    $allTrophies = q($pdo, $trophySql, $trophyParams)->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
     foreach ($seasonsByPlayer as $pid => $seasonMap) {
         $count = 0;
@@ -397,7 +458,13 @@ usort($rows, static function(array $a, array $b) use ($orderCol, $orderDir): int
  * DETALHE DO JOGADOR
  * -------------------------------------------------------------------------- */
 if ($playerId > 0) {
-    $player = q($pdo, "SELECT * FROM players WHERE id = ?", [$playerId])->fetch(PDO::FETCH_ASSOC);
+    $playerSql = "SELECT * FROM players WHERE id = ?";
+    $playerParams = [$playerId];
+    if ($playersHasUserId) {
+        $playerSql .= " AND user_id = ?";
+        $playerParams[] = $userId;
+    }
+    $player = q($pdo, $playerSql, $playerParams)->fetch(PDO::FETCH_ASSOC);
 
     render_header('Almanaque de Jogadores');
 
@@ -542,6 +609,13 @@ if ($playerId > 0) {
         LEFT JOIN match_player_stats s
           ON s.match_id = fp.match_id
          AND s.player_id = fp.player_id
+    ";
+
+    if ($statsHasUserId) {
+        $detailSql .= " AND s.user_id = :user_id";
+    }
+
+    $detailSql .= "
         WHERE fp.player_id = :player_id
         ORDER BY date(fp.match_date) DESC, fp.match_id DESC
     ";
@@ -713,6 +787,3 @@ echo '  </div>';
 echo '</div>';
 
 render_footer();
-
-
-

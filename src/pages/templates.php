@@ -3,15 +3,27 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../db.php';
 
-$pdo  = db();
-$club = (string)app_club(); // ex.: PALMEIRAS
+$pdo    = db();
+$userId = require_user_id();
+$club   = (string)app_club(); // ex.: PALMEIRAS
 
 $positions = ['GOL','ZAG','LD','LE','ALD','ALE','VOL','MC','ME','MD','MEI','PD','PE','SA','ATA'];
 
-// Garante índice único pra UPSERT (SQLite)
+/*
+|--------------------------------------------------------------------------
+| Índice único para UPSERT
+|--------------------------------------------------------------------------
+| Em ambiente multiusuário, o índice precisa considerar user_id.
+|--------------------------------------------------------------------------
+*/
 try {
-  $pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS ux_tpl_slot ON lineup_template_slots(template_id, role, sort_order);");
-} catch (Throwable $e) {}
+  $pdo->exec("
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_tpl_slot_user
+    ON lineup_template_slots(user_id, template_id, role, sort_order);
+  ");
+} catch (Throwable $e) {
+  // ignora
+}
 
 function gv(string $k, string $d=''): string { return isset($_GET[$k]) ? (string)$_GET[$k] : $d; }
 function pv(string $k, string $d=''): string { return isset($_POST[$k]) ? (string)$_POST[$k] : $d; }
@@ -29,31 +41,56 @@ function select_options(array $values, string $selected=''): string {
 $err = gv('err','');
 $msg = gv('msg','');
 
-// Templates
-$templates = q($pdo, "SELECT id, template_name, formation, notes FROM lineup_templates ORDER BY template_name ASC")
-  ->fetchAll(PDO::FETCH_ASSOC) ?: [];
+/* ===================== Templates ===================== */
+$templates = q(
+  $pdo,
+  "
+  SELECT id, template_name, formation, notes
+  FROM lineup_templates
+  WHERE user_id = :user_id
+  ORDER BY template_name ASC
+  ",
+  [':user_id' => $userId]
+)->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-// Template selecionado
+/* ===================== Template selecionado ===================== */
 $tplId = (int)gv('tpl_id', '0');
-if ($tplId <= 0 && !empty($templates)) $tplId = (int)$templates[0]['id'];
+if ($tplId <= 0 && !empty($templates)) {
+  $tplId = (int)$templates[0]['id'];
+}
 
 $tpl = null;
 if ($tplId > 0) {
-  $tpl = q($pdo, "SELECT id, template_name, formation, notes FROM lineup_templates WHERE id=? LIMIT 1", [$tplId])
-    ->fetch(PDO::FETCH_ASSOC) ?: null;
+  $tpl = q(
+    $pdo,
+    "
+    SELECT id, template_name, formation, notes
+    FROM lineup_templates
+    WHERE id = :id
+      AND user_id = :user_id
+    LIMIT 1
+    ",
+    [
+      ':id'      => $tplId,
+      ':user_id' => $userId,
+    ]
+  )->fetch(PDO::FETCH_ASSOC) ?: null;
 }
 
 /**
- * ✅ ATLETAS DO MEU CLUBE
- * - filtra por club_name = app_club() (TRIM + NOCASE)
- * - exclui placeholders APENAS do padrão "p" + número (p1, p10, p20...)
- *   sem excluir nomes reais como PAULINHO ou PIQUEREZ
+ * ✅ ATLETAS DO MEU CLUBE E DO USUÁRIO LOGADO
+ * - user_id = usuário atual
+ * - club_name = app_club()
+ * - exclui placeholders do padrão p1, p2, p10...
  */
-$players = q($pdo, "
+$players = q(
+  $pdo,
+  "
   SELECT id, name, shirt_number, primary_position, club_name
   FROM players
-  WHERE is_active = 1
-    AND TRIM(club_name) = TRIM(?) COLLATE NOCASE
+  WHERE user_id = :user_id
+    AND is_active = 1
+    AND TRIM(club_name) = TRIM(:club) COLLATE NOCASE
     AND NOT (LOWER(TRIM(name)) GLOB 'p[0-9]*')
   ORDER BY
     CASE WHEN primary_position IS NULL OR primary_position = '' THEN 1 ELSE 0 END,
@@ -61,7 +98,12 @@ $players = q($pdo, "
     CASE WHEN shirt_number IS NULL THEN 1 ELSE 0 END,
     shirt_number,
     name
-", [$club])->fetchAll(PDO::FETCH_ASSOC) ?: [];
+  ",
+  [
+    ':user_id' => $userId,
+    ':club'    => $club,
+  ]
+)->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
 /* ===================== POST ===================== */
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
@@ -69,34 +111,109 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 
   if ($action === 'create_template') {
     $newName = trim(pv('new_template_name'));
-    if ($newName === '') redirect('/?page=templates&err=tpl_name');
+    if ($newName === '') {
+      redirect('/?page=templates&err=tpl_name');
+    }
 
-    $exists = q($pdo, "
+    $exists = q(
+      $pdo,
+      "
       SELECT id
       FROM lineup_templates
-      WHERE template_name=? COLLATE NOCASE
+      WHERE user_id = :user_id
+        AND template_name = :template_name COLLATE NOCASE
       LIMIT 1
-    ", [$newName])->fetch(PDO::FETCH_ASSOC);
+      ",
+      [
+        ':user_id'       => $userId,
+        ':template_name' => $newName,
+      ]
+    )->fetch(PDO::FETCH_ASSOC);
 
-    if ($exists) redirect('/?page=templates&err=tpl_exists');
+    if ($exists) {
+      redirect('/?page=templates&err=tpl_exists');
+    }
 
-    q($pdo, "INSERT INTO lineup_templates(template_name, formation, notes) VALUES (?,?,?)", [$newName, '', '']);
+    q(
+      $pdo,
+      "
+      INSERT INTO lineup_templates(user_id, template_name, formation, notes)
+      VALUES (:user_id, :template_name, :formation, :notes)
+      ",
+      [
+        ':user_id'       => $userId,
+        ':template_name' => $newName,
+        ':formation'     => '',
+        ':notes'         => '',
+      ]
+    );
+
     $newId = (int)$pdo->lastInsertId();
     redirect('/?page=templates&tpl_id='.$newId.'&msg=created');
   }
 
   $tplIdPost = (int)pv('template_id', '0');
-  if ($tplIdPost <= 0) redirect('/?page=templates&err=tpl');
+  if ($tplIdPost <= 0) {
+    redirect('/?page=templates&err=tpl');
+  }
+
+  $tplExists = q(
+    $pdo,
+    "
+    SELECT id
+    FROM lineup_templates
+    WHERE id = :id
+      AND user_id = :user_id
+    LIMIT 1
+    ",
+    [
+      ':id'      => $tplIdPost,
+      ':user_id' => $userId,
+    ]
+  )->fetch(PDO::FETCH_ASSOC);
+
+  if (!$tplExists) {
+    redirect('/?page=templates&err=tpl');
+  }
 
   if ($action === 'save_meta') {
     $formation = trim(pv('formation'));
     $notes     = trim(pv('notes'));
-    q($pdo, "UPDATE lineup_templates SET formation=?, notes=? WHERE id=?", [$formation, $notes, $tplIdPost]);
+
+    q(
+      $pdo,
+      "
+      UPDATE lineup_templates
+      SET formation = :formation,
+          notes = :notes
+      WHERE id = :id
+        AND user_id = :user_id
+      ",
+      [
+        ':formation' => $formation,
+        ':notes'     => $notes,
+        ':id'        => $tplIdPost,
+        ':user_id'   => $userId,
+      ]
+    );
+
     redirect('/?page=templates&tpl_id='.$tplIdPost.'&msg=meta');
   }
 
   if ($action === 'clear') {
-    q($pdo, "DELETE FROM lineup_template_slots WHERE template_id=?", [$tplIdPost]);
+    q(
+      $pdo,
+      "
+      DELETE FROM lineup_template_slots
+      WHERE template_id = :template_id
+        AND user_id = :user_id
+      ",
+      [
+        ':template_id' => $tplIdPost,
+        ':user_id'     => $userId,
+      ]
+    );
+
     redirect('/?page=templates&tpl_id='.$tplIdPost.'&msg=cleared');
   }
 
@@ -109,44 +226,91 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 
     $pos = strtoupper(trim(pv('position','')));
 
-    // ✅ Validações para compatibilidade create_match.php
-    if ($role !== 'STARTER' && $role !== 'BENCH') redirect('/?page=templates&tpl_id='.$tplIdPost.'&err=role');
-    if ($role === 'STARTER' && ($order < 0 || $order > 10)) redirect('/?page=templates&tpl_id='.$tplIdPost.'&err=order_starter');
-    if ($role === 'BENCH'   && ($order < 0 || $order > 8))  redirect('/?page=templates&tpl_id='.$tplIdPost.'&err=order_bench');
+    // ✅ validações
+    if ($role !== 'STARTER' && $role !== 'BENCH') {
+      redirect('/?page=templates&tpl_id='.$tplIdPost.'&err=role');
+    }
 
-    // ✅ valida posição (se preenchida)
+    if ($role === 'STARTER' && ($order < 0 || $order > 10)) {
+      redirect('/?page=templates&tpl_id='.$tplIdPost.'&err=order_starter');
+    }
+
+    if ($role === 'BENCH' && ($order < 0 || $order > 8)) {
+      redirect('/?page=templates&tpl_id='.$tplIdPost.'&err=order_bench');
+    }
+
     if ($pos !== '' && !in_array($pos, $positions, true)) {
       redirect('/?page=templates&tpl_id='.$tplIdPost.'&err=pos');
     }
 
-    // ✅ Se selecionar atleta, valida que é do clube do topo (anti-bypass)
+    // ✅ se selecionar atleta, valida que pertence ao usuário logado e ao clube atual
     if ($playerId !== null) {
-      $check = q($pdo, "
+      $check = q(
+        $pdo,
+        "
         SELECT id
         FROM players
-        WHERE id=?
-          AND is_active=1
-          AND TRIM(club_name) = TRIM(?) COLLATE NOCASE
+        WHERE id = :id
+          AND user_id = :user_id
+          AND is_active = 1
+          AND TRIM(club_name) = TRIM(:club) COLLATE NOCASE
           AND NOT (LOWER(TRIM(name)) GLOB 'p[0-9]*')
         LIMIT 1
-      ", [$playerId, $club])->fetch(PDO::FETCH_ASSOC);
+        ",
+        [
+          ':id'      => $playerId,
+          ':user_id' => $userId,
+          ':club'    => $club,
+        ]
+      )->fetch(PDO::FETCH_ASSOC);
 
-      if (!$check) redirect('/?page=templates&tpl_id='.$tplIdPost.'&err=player_not_allowed');
+      if (!$check) {
+        redirect('/?page=templates&tpl_id='.$tplIdPost.'&err=player_not_allowed');
+      }
     }
 
     // Se não selecionou atleta e não informou posição, remove o slot
     if ($playerId === null && $pos === '') {
-      q($pdo, "DELETE FROM lineup_template_slots WHERE template_id=? AND role=? AND sort_order=?", [$tplIdPost, $role, $order]);
+      q(
+        $pdo,
+        "
+        DELETE FROM lineup_template_slots
+        WHERE template_id = :template_id
+          AND user_id = :user_id
+          AND role = :role
+          AND sort_order = :sort_order
+        ",
+        [
+          ':template_id' => $tplIdPost,
+          ':user_id'     => $userId,
+          ':role'        => $role,
+          ':sort_order'  => $order,
+        ]
+      );
+
       redirect('/?page=templates&tpl_id='.$tplIdPost.'&msg=slot_removed');
     }
 
     // UPSERT
-    q($pdo, "
-      INSERT INTO lineup_template_slots(template_id, role, sort_order, player_id, position)
-      VALUES (?,?,?,?,?)
-      ON CONFLICT(template_id, role, sort_order)
-      DO UPDATE SET player_id=excluded.player_id, position=excluded.position
-    ", [$tplIdPost, $role, $order, $playerId, $pos]);
+    q(
+      $pdo,
+      "
+      INSERT INTO lineup_template_slots(user_id, template_id, role, sort_order, player_id, position)
+      VALUES (:user_id, :template_id, :role, :sort_order, :player_id, :position)
+      ON CONFLICT(user_id, template_id, role, sort_order)
+      DO UPDATE SET
+        player_id = excluded.player_id,
+        position  = excluded.position
+      ",
+      [
+        ':user_id'     => $userId,
+        ':template_id' => $tplIdPost,
+        ':role'        => $role,
+        ':sort_order'  => $order,
+        ':player_id'   => $playerId,
+        ':position'    => $pos,
+      ]
+    );
 
     redirect('/?page=templates&tpl_id='.$tplIdPost.'&msg=slot_saved');
   }
@@ -157,13 +321,23 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 /* ===================== Slots ===================== */
 $slots = [];
 if ($tpl) {
-  $slots = q($pdo, "
+  $slots = q(
+    $pdo,
+    "
     SELECT s.*, p.name, p.shirt_number, p.primary_position
     FROM lineup_template_slots s
-    LEFT JOIN players p ON p.id=s.player_id
-    WHERE s.template_id=?
-    ORDER BY CASE WHEN s.role='STARTER' THEN 0 ELSE 1 END, s.sort_order
-  ", [(int)$tpl['id']])->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    LEFT JOIN players p
+      ON p.id = s.player_id
+     AND p.user_id = s.user_id
+    WHERE s.template_id = :template_id
+      AND s.user_id = :user_id
+    ORDER BY CASE WHEN s.role = 'STARTER' THEN 0 ELSE 1 END, s.sort_order
+    ",
+    [
+      ':template_id' => (int)$tpl['id'],
+      ':user_id'     => $userId,
+    ]
+  )->fetchAll(PDO::FETCH_ASSOC) ?: [];
 }
 
 render_header('Templates');
@@ -260,8 +434,7 @@ echo '</div>';
 
 if (count($players) === 0) {
   echo '<div class="alert alert-warning card-soft">
-          Nenhum atleta ativo encontrado para o clube <b>'.h($club).'</b>.
-          Verifique o campo <code>players.club_name</code> no banco.
+          Nenhum atleta ativo encontrado para o clube <b>'.h($club).'</b> neste usuário.
         </div>';
 }
 
@@ -328,10 +501,3 @@ echo '</div></div>'; // right card
 echo '</div>';       // row
 
 render_footer();
-
-
-
-
-
-
-

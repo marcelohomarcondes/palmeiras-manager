@@ -3,11 +3,12 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../db.php';
 
-$pdo  = db();
-$club = app_club(); // ex: PALMEIRAS
+$pdo    = db();
+$userId = require_user_id();
+$club   = app_club(); // ex: PALMEIRAS
 
 /* =========================================================
-   Helpers (sem redeclarar q() / h() do projeto)
+   Helpers
    ========================================================= */
 
 if (!function_exists('pm_log')) {
@@ -18,10 +19,6 @@ if (!function_exists('pm_log')) {
     $ts = date('Y-m-d H:i:s');
     @file_put_contents($file, "[$ts][$level] $message\n", FILE_APPEND);
   }
-}
-
-if (!function_exists('redirect')) {
-  function redirect(string $url): void { header('Location: '.$url); exit; }
 }
 
 if (!function_exists('postv')) {
@@ -64,9 +61,6 @@ if (!function_exists('table_exists')) {
 }
 
 if (!function_exists('table_info')) {
-  /**
-   * Retorna map: colName => ['notnull'=>0/1,'dflt'=>mixed,'type'=>string]
-   */
   function table_info(PDO $pdo, string $table): array {
     $map = [];
     try {
@@ -86,7 +80,9 @@ if (!function_exists('table_info')) {
 
 if (!function_exists('pick_col')) {
   function pick_col(array $cols, array $candidates): ?string {
-    foreach ($candidates as $c) if (isset($cols[$c])) return $c;
+    foreach ($candidates as $c) {
+      if (isset($cols[$c])) return $c;
+    }
     return null;
   }
 }
@@ -104,8 +100,69 @@ if (!function_exists('select_options')) {
   }
 }
 
+function has_user_id_col(PDO $pdo, string $table): bool
+{
+  return isset(table_info($pdo, $table)['user_id']);
+}
+
+function sql_user_clause(PDO $pdo, string $table, string $alias, string $param = ':user_id'): string
+{
+  return has_user_id_col($pdo, $table) ? " AND {$alias}.user_id = {$param} " : ' ';
+}
+
+function sql_user_where(PDO $pdo, string $table, string $alias, string $param = ':user_id'): string
+{
+  return has_user_id_col($pdo, $table) ? " {$alias}.user_id = {$param} " : ' 1=1 ';
+}
+
+function add_user_id_if_exists(PDO $pdo, string $table, array &$data, int $userId): void
+{
+  if (has_user_id_col($pdo, $table)) {
+    $data['user_id'] = $userId;
+  }
+}
+
+function insert_dynamic(PDO $pdo, string $table, array $data): void
+{
+  $cols = array_keys($data);
+  $ph   = array_fill(0, count($cols), '?');
+  $sql  = "INSERT INTO {$table}(".implode(',', $cols).") VALUES(".implode(',', $ph).")";
+  $pdo->prepare($sql)->execute(array_values($data));
+}
+
+function update_dynamic(PDO $pdo, string $table, array $data, string $whereSql, array $whereParams = []): void
+{
+  $set = implode(',', array_map(fn($c) => $c.'=?', array_keys($data)));
+  $sql = "UPDATE {$table} SET {$set} WHERE {$whereSql}";
+  $pdo->prepare($sql)->execute(array_merge(array_values($data), $whereParams));
+}
+
+function current_match_form_url(string $extra = ''): string
+{
+  $page = (string)($_GET['page'] ?? 'create_match');
+  $page = ($page === 'edit_match') ? 'edit_match' : 'create_match';
+
+  $matchId = 0;
+  if (isset($_POST['match_id'])) {
+    $matchId = (int)($_POST['match_id'] ?? 0);
+  } elseif (isset($_GET['id'])) {
+    $matchId = (int)($_GET['id'] ?? 0);
+  }
+
+  $url = '?page=' . $page;
+  if ($page === 'edit_match' && $matchId > 0) {
+    $url .= '&id=' . $matchId;
+  }
+
+  if ($extra !== '') {
+    $url .= '&' . ltrim($extra, '&');
+  }
+
+  return $url;
+}
+
 /* =========================================================
-   Listas (mantém seu padrão)
+   Listas
    ========================================================= */
 
 $competitions = [
@@ -134,19 +191,23 @@ $err = trim((string)($_GET['err'] ?? ''));
 $msg = trim((string)($_GET['msg'] ?? ''));
 
 /* =========================================================
-   EDIT MODE (pré-preenchimento ao abrir com ?page=create_match&id=XX)
-   - Não altera front-end: apenas injeta valores em $_POST/$_GET para o form já existente
+   EDIT MODE
    ========================================================= */
 $editId = (int)($_GET['id'] ?? 0);
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' && $editId > 0) {
+  $mSql = "SELECT * FROM matches WHERE id = :id";
+  $mParams = [':id' => $editId];
+  if (has_user_id_col($pdo, 'matches')) {
+    $mSql .= " AND user_id = :user_id";
+    $mParams[':user_id'] = $userId;
+  }
+  $mSql .= " LIMIT 1";
 
-  // Partida
-  $mrow = q($pdo, "SELECT * FROM matches WHERE id = ? LIMIT 1", [$editId])->fetch(PDO::FETCH_ASSOC);
+  $mrow = q($pdo, $mSql, $mParams)->fetch(PDO::FETCH_ASSOC);
   if (!$mrow) {
     redirect('/?page=matches&err=not_found');
   }
 
-  // Descobre lado do Palmeiras
   $homeName = (string)($mrow['home'] ?? ($mrow['home_team'] ?? ''));
   $awayName = (string)($mrow['away'] ?? ($mrow['away_team'] ?? ''));
   $isHomePal = (strcasecmp($homeName, $club) === 0);
@@ -154,17 +215,14 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' && $editId > 0) {
   $oppType   = $isHomePal ? 'AWAY' : 'HOME';
   $oppClub   = $isHomePal ? $awayName : $homeName;
 
-  // Campos simples do form (se existirem na tabela matches)
   foreach ($mrow as $k => $v) {
     $val = ($v === null) ? '' : (string)$v;
-    $_GET[$k]  = $val;   // para fval()
-    $_POST[$k] = $val;  // para postv()
+    $_GET[$k]  = $val;
+    $_POST[$k] = $val;
   }
 
-  // Match id para salvar como UPDATE
   $_POST['match_id'] = (string)$editId;
 
-  // Zera slots
   for ($i=0;$i<11;$i++){
     $_POST["pal_pid_starter_$i"] = $_POST["pal_pid_starter_$i"] ?? '0';
     $_POST["pal_pos_starter_$i"] = $_POST["pal_pos_starter_$i"] ?? '';
@@ -178,13 +236,19 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' && $editId > 0) {
     $_POST["opp_pos_bench_$i"]  = $_POST["opp_pos_bench_$i"] ?? '';
   }
 
-  // Slots da partida
-  $mpr = q($pdo, "
+  $mpSql = "
     SELECT role, sort_order, position, player_id, opponent_player_id
     FROM match_players
-    WHERE match_id = ?
-    ORDER BY role ASC, sort_order ASC
-  ", [$editId])->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    WHERE match_id = :match_id
+  ";
+  $mpParams = [':match_id' => $editId];
+  if (has_user_id_col($pdo, 'match_players')) {
+    $mpSql .= " AND user_id = :user_id";
+    $mpParams[':user_id'] = $userId;
+  }
+  $mpSql .= " ORDER BY role ASC, sort_order ASC";
+
+  $mpr = q($pdo, $mpSql, $mpParams)->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
   $needOppNames = [];
   foreach ($mpr as $r) {
@@ -206,11 +270,16 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' && $editId > 0) {
     }
   }
 
-  // Resolve nomes do adversário por ID
   if ($needOppNames) {
     $ids = array_keys($needOppNames);
     $in  = implode(',', array_fill(0, count($ids), '?'));
-    $opRows = q($pdo, "SELECT id, name FROM opponent_players WHERE id IN ($in)", $ids)->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $opSql = "SELECT id, name FROM opponent_players WHERE id IN ($in)";
+    $opParams = $ids;
+    if (has_user_id_col($pdo, 'opponent_players')) {
+      $opSql .= " AND user_id = ?";
+      $opParams[] = $userId;
+    }
+    $opRows = q($pdo, $opSql, $opParams)->fetchAll(PDO::FETCH_ASSOC) ?: [];
     $map = [];
     foreach ($opRows as $o) $map[(int)$o['id']] = (string)$o['name'];
 
@@ -225,10 +294,16 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' && $editId > 0) {
     }
   }
 
-  // Stats + MVP (Palmeiras)
   if (table_exists($pdo, 'match_player_stats')) {
     $cols = table_info($pdo, 'match_player_stats');
-    $rows = q($pdo, "SELECT * FROM match_player_stats WHERE match_id = ?", [$editId])->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $sql = "SELECT * FROM match_player_stats WHERE match_id = :match_id";
+    $params = [':match_id' => $editId];
+    if (has_user_id_col($pdo, 'match_player_stats')) {
+      $sql .= " AND user_id = :user_id";
+      $params[':user_id'] = $userId;
+    }
+
+    $rows = q($pdo, $sql, $params)->fetchAll(PDO::FETCH_ASSOC) ?: [];
     $byPid = [];
     foreach ($rows as $s) {
       $pid = (int)($s['player_id'] ?? 0);
@@ -262,17 +337,22 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' && $editId > 0) {
     }
   }
 
-  // Stats + MVP (Adversário)
   if (table_exists($pdo, 'opponent_match_player_stats')) {
     $cols = table_info($pdo, 'opponent_match_player_stats');
-    $rows = q($pdo, "SELECT * FROM opponent_match_player_stats WHERE match_id = ?", [$editId])->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $sql = "SELECT * FROM opponent_match_player_stats WHERE match_id = :match_id";
+    $params = [':match_id' => $editId];
+    if (has_user_id_col($pdo, 'opponent_match_player_stats')) {
+      $sql .= " AND user_id = :user_id";
+      $params[':user_id'] = $userId;
+    }
+
+    $rows = q($pdo, $sql, $params)->fetchAll(PDO::FETCH_ASSOC) ?: [];
     $byOid = [];
     foreach ($rows as $s) {
       $oid = (int)($s['opponent_player_id'] ?? 0);
       if ($oid > 0) $byOid[$oid] = $s;
     }
 
-    // oid por slot (derivado dos match_players)
     $oidBySlot = ['starter'=>[], 'bench'=>[]];
     foreach ($mpr as $r) {
       if (empty($r['opponent_player_id'])) continue;
@@ -310,13 +390,24 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' && $editId > 0) {
     }
   }
 
-  // Substituições (pal = ids / opp = nomes)
   if (table_exists($pdo, 'match_substitutions')) {
-    $subs = q($pdo, "SELECT * FROM match_substitutions WHERE match_id = ? ORDER BY sort_order ASC, id ASC", [$editId])->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $subsSql = "SELECT * FROM match_substitutions WHERE match_id = ? ";
+    $subsParams = [$editId];
+    if (has_user_id_col($pdo, 'match_substitutions')) {
+      $subsSql .= " AND user_id = ? ";
+      $subsParams[] = $userId;
+    }
+    $subsSql .= " ORDER BY sort_order ASC, id ASC ";
+    $subs = q($pdo, $subsSql, $subsParams)->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-    // Mapa id->nome do adversário
+    $oppAllSql = "SELECT id, name FROM opponent_players WHERE club_name=? COLLATE NOCASE";
+    $oppAllParams = [$oppClub];
+    if (has_user_id_col($pdo, 'opponent_players')) {
+      $oppAllSql .= " AND user_id = ?";
+      $oppAllParams[] = $userId;
+    }
+    $oppAll = q($pdo, $oppAllSql, $oppAllParams)->fetchAll(PDO::FETCH_ASSOC) ?: [];
     $oppNameById = [];
-    $oppAll = q($pdo, "SELECT id, name FROM opponent_players WHERE club_name=? COLLATE NOCASE", [$oppClub])->fetchAll(PDO::FETCH_ASSOC) ?: [];
     foreach ($oppAll as $o) $oppNameById[(int)$o['id']] = (string)$o['name'];
 
     $p = 0; $o = 0;
@@ -339,31 +430,103 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' && $editId > 0) {
       }
     }
   }
-
 }
-
 
 /* =========================================================
    Palmeiras players
+   - Em edição, mantém disponíveis também os atletas já usados
+     na partida, mesmo que hoje estejam inativos/vendidos/emprestados.
    ========================================================= */
 
+$editingMatchId = 0;
+if (postv('match_id') !== '') {
+  $editingMatchId = to_int(postv('match_id'), 0);
+} elseif (!empty($_GET['id'])) {
+  $editingMatchId = (int)($_GET['id'] ?? 0);
+}
+
+$lockedPlayerIds = [];
+
+/**
+ * 1) Captura jogadores já preenchidos no formulário
+ */
+foreach (['starter' => $MAX_STARTERS, 'bench' => $MAX_BENCH] as $roleL => $max) {
+  for ($i = 0; $i < $max; $i++) {
+    $pid = to_int(postv("pal_pid_{$roleL}_{$i}"), 0);
+    if ($pid > 0) {
+      $lockedPlayerIds[$pid] = true;
+    }
+  }
+}
+
+/**
+ * 2) Captura também os jogadores já vinculados à partida salva
+ */
+if ($editingMatchId > 0 && table_exists($pdo, 'match_players')) {
+  $sql = "
+    SELECT DISTINCT player_id
+    FROM match_players
+    WHERE match_id = :match_id
+      AND player_id IS NOT NULL
+      AND player_id > 0
+  ";
+  $params = [':match_id' => $editingMatchId];
+
+  if (has_user_id_col($pdo, 'match_players')) {
+    $sql .= " AND user_id = :user_id";
+    $params[':user_id'] = $userId;
+  }
+
+  try {
+    $rows = q($pdo, $sql, $params)->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    foreach ($rows as $r) {
+      $pid = (int)($r['player_id'] ?? 0);
+      if ($pid > 0) {
+        $lockedPlayerIds[$pid] = true;
+      }
+    }
+  } catch (Throwable $e) {
+    // segue normalmente
+  }
+}
+
 $palPlayers = [];
+
 try {
-  $palPlayers = q($pdo, "
+  $palPlayersSql = "
     SELECT id, name, shirt_number
     FROM players
-    WHERE is_active = 1
-      AND club_name = ? COLLATE NOCASE
-    ORDER BY name
-  ", [$club])->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    WHERE club_name = :club COLLATE NOCASE
+  ";
+  $palPlayersParams = [':club' => $club];
+
+  if (has_user_id_col($pdo, 'players')) {
+    $palPlayersSql .= " AND user_id = :user_id ";
+    $palPlayersParams[':user_id'] = $userId;
+  }
+
+  if ($lockedPlayerIds) {
+    $idList = array_values(array_map('intval', array_keys($lockedPlayerIds)));
+    $placeholders = [];
+    foreach ($idList as $idx => $pid) {
+      $ph = ':keep_' . $idx;
+      $placeholders[] = $ph;
+      $palPlayersParams[$ph] = $pid;
+    }
+
+    $palPlayersSql .= " AND (is_active = 1 OR id IN (" . implode(',', $placeholders) . ")) ";
+  } else {
+    $palPlayersSql .= " AND is_active = 1 ";
+  }
+
+  $palPlayersSql .= " ORDER BY name ";
+  $palPlayers = q($pdo, $palPlayersSql, $palPlayersParams)->fetchAll(PDO::FETCH_ASSOC) ?: [];
 } catch (Throwable $e) {
   $palPlayers = [];
 }
 
 /* =========================================================
-   Templates (auto-detect schema)
-   - lineup_templates / lineup_template_slots
-   - templates / template_players
+   Templates
    ========================================================= */
 
 function detect_templates_schema(PDO $pdo): array {
@@ -379,7 +542,7 @@ function detect_templates_schema(PDO $pdo): array {
   $clubCol = null;
 
   if ($tplTable) {
-    $info   = table_info($pdo, $tplTable);
+    $info    = table_info($pdo, $tplTable);
     $nameCol = pick_col($info, ['template_name','name','title']);
     $clubCol = pick_col($info, ['club_name','club']);
   }
@@ -393,42 +556,45 @@ function detect_templates_schema(PDO $pdo): array {
 }
 
 $tplSchema = detect_templates_schema($pdo);
-
 $templates = [];
+
 try {
   if ($tplSchema['tplTable'] && $tplSchema['nameCol']) {
     $tTable = $tplSchema['tplTable'];
     $nCol   = $tplSchema['nameCol'];
     $cCol   = $tplSchema['clubCol'];
 
+    $sql = "SELECT id, $nCol AS template_name FROM $tTable WHERE 1=1 ";
+    $params = [];
+
     if ($cCol) {
-      $templates = q($pdo,
-        "SELECT id, $nCol AS template_name FROM $tTable WHERE $cCol=? COLLATE NOCASE ORDER BY $nCol ASC",
-        [$club]
-      )->fetchAll(PDO::FETCH_ASSOC) ?: [];
-    } else {
-      $templates = q($pdo,
-        "SELECT id, $nCol AS template_name FROM $tTable ORDER BY $nCol ASC"
-      )->fetchAll(PDO::FETCH_ASSOC) ?: [];
+      $sql .= " AND $cCol = :club COLLATE NOCASE ";
+      $params[':club'] = $club;
     }
+    if (has_user_id_col($pdo, $tTable)) {
+      $sql .= " AND user_id = :user_id ";
+      $params[':user_id'] = $userId;
+    }
+
+    $sql .= " ORDER BY $nCol ASC ";
+    $templates = q($pdo, $sql, $params)->fetchAll(PDO::FETCH_ASSOC) ?: [];
   }
 } catch (Throwable $e) {
   $templates = [];
 }
 
 /* =========================================================
-   UI tabela (mesmo layout base)
+   UI tabela
    ========================================================= */
 
 function render_table_create(
   bool $isPal,
-  string $role, // starter | bench
+  string $role,
   int $maxRows,
   array $positions,
   array $palPlayers,
   string $mvpSelected
 ): void {
-
   $label = ($role === 'starter') ? 'Titulares (11)' : 'Reservas (9)';
 
   echo '<h6 class="mt-3">'.h($label).'</h6>';
@@ -447,7 +613,6 @@ function render_table_create(
   </tr></thead><tbody>';
 
   for ($i=0; $i<$maxRows; $i++) {
-
     if ($isPal) {
       $pidKey = "pal_pid_{$role}_{$i}";
       $posKey = "pal_pos_{$role}_{$i}";
@@ -474,7 +639,6 @@ function render_table_create(
     $small = 'class="form-control form-control-sm text-center px-1" style="max-width:70px;margin:0 auto;"';
 
     echo '<tr class="text-center">';
-
     echo '<td>
       <select class="form-select form-select-sm text-center px-1" name="'.h($posKey).'">
         <option value=""></option>'.select_options($positions, postv($posKey)).'
@@ -503,9 +667,7 @@ function render_table_create(
     echo '<td><input '.$small.' type="number" min="0" name="'.h($caKey).'" value="'.h(postv($caKey)).'"></td>';
     echo '<td><input '.$small.' type="number" min="0" name="'.h($cvKey).'" value="'.h(postv($cvKey)).'"></td>';
     echo '<td><input '.$small.' type="text" name="'.h($rtKey).'" value="'.h(postv($rtKey)).'"></td>';
-
     echo '<td><input type="radio" name="mvp" value="'.h($mvpVal).'" '.$checkedMvp.'></td>';
-
     echo '</tr>';
   }
 
@@ -513,15 +675,16 @@ function render_table_create(
 }
 
 /* =========================================================
-   Substituições (até 5 por time)
+   Substituições
    ========================================================= */
 
 function ensure_match_substitutions_table(PDO $pdo): void {
   $pdo->exec("
     CREATE TABLE IF NOT EXISTS match_substitutions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER,
       match_id INTEGER NOT NULL,
-      side TEXT NOT NULL,                 -- HOME | AWAY
+      side TEXT NOT NULL,
       minute INTEGER NULL,
       player_out_id INTEGER NULL,
       player_in_id  INTEGER NULL,
@@ -551,8 +714,6 @@ function render_subs_block(string $prefix, string $title): void {
 
     echo '<tr class="text-center">';
     echo '<td><input type="number" min="0" max="130" step="1" class="form-control form-control-sm text-center px-1" style="max-width:90px;margin:0 auto;" name="'.h($kMin).'" value="'.h(postv($kMin)).'"></td>';
-
-    // opções preenchidas via JS (sem quebrar padrão visual)
     echo '<td><select class="form-select form-select-sm w-100 sub-out" data-prefix="'.h($prefix).'" data-selected="'.h(postv($kOut)).'" name="'.h($kOut).'"><option value=""></option></select></td>';
     echo '<td><select class="form-select form-select-sm w-100 sub-in"  data-prefix="'.h($prefix).'" data-selected="'.h(postv($kIn)).'" name="'.h($kIn).'"><option value=""></option></select></td>';
     echo '</tr>';
@@ -566,26 +727,30 @@ function render_subs_block(string $prefix, string $title): void {
    ========================================================= */
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
-
   $action = postv('action');
 
-  /* ===== Aplicar template (não salva) ===== */
   if ($action === 'apply_template') {
     $tplId = to_int(postv('pal_template_id'), 0);
-    if ($tplId <= 0) { redirect('?page=create_match&err=tpl'); }
+    if ($tplId <= 0) redirect(current_match_form_url('err=tpl'));
 
     try {
-
       $tplSchema = detect_templates_schema($pdo);
-      if (!$tplSchema['slotTable']) { redirect('?page=create_match&err=tpl_slots'); }
+      if (!$tplSchema['slotTable']) redirect(current_match_form_url('err=tpl_slots'));
       $slotTable = $tplSchema['slotTable'];
 
-      $rows = q($pdo, "
+      $sql = "
         SELECT role, sort_order, player_id, position
         FROM $slotTable
-        WHERE template_id=?
-        ORDER BY role ASC, sort_order ASC
-      ", [$tplId])->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        WHERE template_id = :template_id
+      ";
+      $params = [':template_id' => $tplId];
+      if (has_user_id_col($pdo, $slotTable)) {
+        $sql .= " AND user_id = :user_id ";
+        $params[':user_id'] = $userId;
+      }
+      $sql .= " ORDER BY role ASC, sort_order ASC ";
+
+      $rows = q($pdo, $sql, $params)->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
       for ($i=0;$i<$MAX_STARTERS;$i++){ $_POST["pal_pid_starter_$i"]='0'; $_POST["pal_pos_starter_$i"]=''; }
       for ($i=0;$i<$MAX_BENCH;$i++){ $_POST["pal_pid_bench_$i"]='0'; $_POST["pal_pos_bench_$i"]=''; }
@@ -596,21 +761,24 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         $pid  = (int)($r['player_id'] ?? 0);
         $pos  = trim((string)($r['position'] ?? ''));
 
-        if ($role === 'STARTER' && $i>=0 && $i<$MAX_STARTERS) { $_POST["pal_pid_starter_$i"]=(string)$pid; $_POST["pal_pos_starter_$i"]=$pos; }
-        if ($role === 'BENCH'   && $i>=0 && $i<$MAX_BENCH)    { $_POST["pal_pid_bench_$i"]=(string)$pid;   $_POST["pal_pos_bench_$i"]=$pos; }
+        if ($role === 'STARTER' && $i>=0 && $i<$MAX_STARTERS) {
+          $_POST["pal_pid_starter_$i"] = (string)$pid;
+          $_POST["pal_pos_starter_$i"] = $pos;
+        }
+        if ($role === 'BENCH' && $i>=0 && $i<$MAX_BENCH) {
+          $_POST["pal_pid_bench_$i"] = (string)$pid;
+          $_POST["pal_pos_bench_$i"] = $pos;
+        }
       }
 
       $_POST['pal_template_id'] = (string)$tplId;
       $msg = 'tpl';
       goto RENDER_PAGE;
-
     } catch (Throwable $e) {
       pm_log('ERROR', 'apply_template FAIL: '.$e->getMessage());
-      redirect('?page=create_match&err=tpl');
+      redirect(current_match_form_url('err=tpl'));
     }
   }
-
-  /* ===== Salvar partida ===== */
 
   $season      = postv('season');
   $competition = postv('competition');
@@ -631,7 +799,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 
   $isHomePal = (strcasecmp($home, $club) === 0);
   $isAwayPal = (strcasecmp($away, $club) === 0);
-  if (!$isHomePal && !$isAwayPal) redirect('?page=create_match&err=palmeiras_only');
+  if (!$isHomePal && !$isAwayPal) redirect(current_match_form_url('err=palmeiras_only'));
 
   $oppClub = $isHomePal ? $away : $home;
 
@@ -640,20 +808,18 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 
   $mvpSelected = postv('mvp');
 
-  // Escalações
   $palRows = [];
   $oppRows = [];
 
   for ($i=0;$i<$MAX_STARTERS;$i++) {
     $pid = to_int(postv("pal_pid_starter_$i"), 0);
     $pos = postv("pal_pos_starter_$i");
-
-    $g  = to_int(postv("pal_g_starter_$i"), 0);
-    $a  = to_int(postv("pal_a_starter_$i"), 0);
-    $gc = to_int(postv("pal_og_starter_$i"), 0); // GC = gols contra (own goals)
-    $ca = to_int(postv("pal_y_starter_$i"), 0);
-    $cv = to_int(postv("pal_r_starter_$i"), 0);
-    $rt = to_float(postv("pal_rating_starter_$i"), 0.0);
+    $g   = to_int(postv("pal_g_starter_$i"), 0);
+    $a   = to_int(postv("pal_a_starter_$i"), 0);
+    $gc  = to_int(postv("pal_og_starter_$i"), 0);
+    $ca  = to_int(postv("pal_y_starter_$i"), 0);
+    $cv  = to_int(postv("pal_r_starter_$i"), 0);
+    $rt  = to_float(postv("pal_rating_starter_$i"), 0.0);
 
     if ($pid>0 && $pos!=='') {
       $palRows[] = [
@@ -663,16 +829,16 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
       ];
     }
   }
+
   for ($i=0;$i<$MAX_BENCH;$i++) {
     $pid = to_int(postv("pal_pid_bench_$i"), 0);
     $pos = postv("pal_pos_bench_$i");
-
-    $g  = to_int(postv("pal_g_bench_$i"), 0);
-    $a  = to_int(postv("pal_a_bench_$i"), 0);
-    $gc = to_int(postv("pal_og_bench_$i"), 0); // GC = gols contra (own goals)
-    $ca = to_int(postv("pal_y_bench_$i"), 0);
-    $cv = to_int(postv("pal_r_bench_$i"), 0);
-    $rt = to_float(postv("pal_rating_bench_$i"), 0.0);
+    $g   = to_int(postv("pal_g_bench_$i"), 0);
+    $a   = to_int(postv("pal_a_bench_$i"), 0);
+    $gc  = to_int(postv("pal_og_bench_$i"), 0);
+    $ca  = to_int(postv("pal_y_bench_$i"), 0);
+    $cv  = to_int(postv("pal_r_bench_$i"), 0);
+    $rt  = to_float(postv("pal_rating_bench_$i"), 0.0);
 
     if ($pid>0 && $pos!=='') {
       $palRows[] = [
@@ -686,13 +852,12 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
   for ($i=0;$i<$MAX_STARTERS;$i++) {
     $name = postv("opp_name_starter_$i");
     $pos  = postv("opp_pos_starter_$i");
-
-    $g  = to_int(postv("opp_g_starter_$i"), 0);
-    $a  = to_int(postv("opp_a_starter_$i"), 0);
-    $gc = to_int(postv("opp_og_starter_$i"), 0); // GC = gols contra (own goals)
-    $ca = to_int(postv("opp_y_starter_$i"), 0);
-    $cv = to_int(postv("opp_r_starter_$i"), 0);
-    $rt = to_float(postv("opp_rating_starter_$i"), 0.0);
+    $g    = to_int(postv("opp_g_starter_$i"), 0);
+    $a    = to_int(postv("opp_a_starter_$i"), 0);
+    $gc   = to_int(postv("opp_og_starter_$i"), 0);
+    $ca   = to_int(postv("opp_y_starter_$i"), 0);
+    $cv   = to_int(postv("opp_r_starter_$i"), 0);
+    $rt   = to_float(postv("opp_rating_starter_$i"), 0.0);
 
     if ($name!=='' && $pos!=='') {
       $oppRows[] = [
@@ -702,16 +867,16 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
       ];
     }
   }
+
   for ($i=0;$i<$MAX_BENCH;$i++) {
     $name = postv("opp_name_bench_$i");
     $pos  = postv("opp_pos_bench_$i");
-
-    $g  = to_int(postv("opp_g_bench_$i"), 0);
-    $a  = to_int(postv("opp_a_bench_$i"), 0);
-    $gc = to_int(postv("opp_og_bench_$i"), 0); // GC = gols contra (own goals)
-    $ca = to_int(postv("opp_y_bench_$i"), 0);
-    $cv = to_int(postv("opp_r_bench_$i"), 0);
-    $rt = to_float(postv("opp_rating_bench_$i"), 0.0);
+    $g    = to_int(postv("opp_g_bench_$i"), 0);
+    $a    = to_int(postv("opp_a_bench_$i"), 0);
+    $gc   = to_int(postv("opp_og_bench_$i"), 0);
+    $ca   = to_int(postv("opp_y_bench_$i"), 0);
+    $cv   = to_int(postv("opp_r_bench_$i"), 0);
+    $rt   = to_float(postv("opp_rating_bench_$i"), 0.0);
 
     if ($name!=='' && $pos!=='') {
       $oppRows[] = [
@@ -722,23 +887,20 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     }
   }
 
-  if (count($palRows) < 1 || count($oppRows) < 1) redirect('?page=create_match&err=roster_required');
+  if (count($palRows) < 1 || count($oppRows) < 1) redirect(current_match_form_url('err=roster_required'));
 
-  // evita repetição no Palmeiras
   $seen = [];
   foreach ($palRows as $r) {
     $pid = (int)$r['player_id'];
-    if (isset($seen[$pid])) redirect('?page=create_match&err=dup_player');
-    $seen[$pid]=true;
+    if (isset($seen[$pid])) redirect(current_match_form_url('err=dup_player'));
+    $seen[$pid] = true;
   }
 
-  // Substituições (até 5 por time)
   $subsPal = [];
   $subsOpp = [];
 
-  // Palmeiras: OUT apenas titulares, IN apenas reservas
   $palStarters = [];
-  $palBench    = [];
+  $palBench = [];
   for ($i=0;$i<$MAX_STARTERS;$i++) {
     $pid = to_int(postv("pal_pid_starter_$i"), 0);
     if ($pid > 0) $palStarters[$pid] = true;
@@ -753,24 +915,17 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     $outId  = to_int(postv("pal_sub_out_$i"), 0);
     $inId   = to_int(postv("pal_sub_in_$i"), 0);
 
-    if ($minRaw === '' && $outId === 0 && $inId === 0) continue; // linha vazia
-    if ($outId === 0 || $inId === 0) redirect('?page=create_match&err=subs_incomplete');
-    if ($outId === $inId) redirect('?page=create_match&err=subs_same');
+    if ($minRaw === '' && $outId === 0 && $inId === 0) continue;
+    if ($outId === 0 || $inId === 0) redirect(current_match_form_url('err=subs_incomplete'));
+    if ($outId === $inId) redirect(current_match_form_url('err=subs_same'));
+    if (!isset($palStarters[$outId])) redirect(current_match_form_url('err=subs_out_not_starter'));
+    if (!isset($palBench[$inId])) redirect(current_match_form_url('err=subs_in_not_bench'));
 
-    if (!isset($palStarters[$outId])) redirect('?page=create_match&err=subs_out_not_starter');
-    if (!isset($palBench[$inId]))     redirect('?page=create_match&err=subs_in_not_bench');
-
-    $subsPal[] = [
-      'minute' => ($minRaw === '' ? null : (int)$minRaw),
-      'out'    => $outId,
-      'in'     => $inId,
-      'sort'   => $i,
-    ];
+    $subsPal[] = ['minute' => ($minRaw === '' ? null : (int)$minRaw), 'out' => $outId, 'in' => $inId, 'sort' => $i];
   }
 
-  // Adversário: OUT apenas titulares (nome), IN apenas reservas (nome)
   $oppStarters = [];
-  $oppBench    = [];
+  $oppBench = [];
   for ($i=0;$i<$MAX_STARTERS;$i++) {
     $nm = trim(postv("opp_name_starter_$i"));
     if ($nm !== '') $oppStarters[strtolower($nm)] = $nm;
@@ -786,50 +941,43 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     $inNm   = trim(postv("opp_sub_in_$i"));
 
     if ($minRaw === '' && $outNm === '' && $inNm === '') continue;
-    if ($outNm === '' || $inNm === '') redirect('?page=create_match&err=subs_incomplete');
-    if (strcasecmp($outNm, $inNm) === 0) redirect('?page=create_match&err=subs_same');
+    if ($outNm === '' || $inNm === '') redirect(current_match_form_url('err=subs_incomplete'));
+    if (strcasecmp($outNm, $inNm) === 0) redirect(current_match_form_url('err=subs_same'));
 
     $kOut = strtolower($outNm);
     $kIn  = strtolower($inNm);
-    if (!isset($oppStarters[$kOut])) redirect('?page=create_match&err=subs_out_not_starter');
-    if (!isset($oppBench[$kIn]))     redirect('?page=create_match&err=subs_in_not_bench');
+    if (!isset($oppStarters[$kOut])) redirect(current_match_form_url('err=subs_out_not_starter'));
+    if (!isset($oppBench[$kIn])) redirect(current_match_form_url('err=subs_in_not_bench'));
 
     $subsOpp[] = [
       'minute' => ($minRaw === '' ? null : (int)$minRaw),
       'out_name' => $oppStarters[$kOut],
       'in_name'  => $oppBench[$kIn],
-      'sort'   => $i,
+      'sort' => $i,
     ];
   }
 
-  // Schema tables
   $matchesInfo = table_info($pdo, 'matches');
-  $matchPlayersInfo = table_info($pdo, 'match_players');
-  $oppPlayersInfo   = table_info($pdo, 'opponent_players');
+  $hasPalStats = table_exists($pdo, 'match_player_stats');
+  $palStatsInfo = $hasPalStats ? table_info($pdo, 'match_player_stats') : [];
+  $hasOppStats = table_exists($pdo, 'opponent_match_player_stats');
+  $oppStatsInfo = $hasOppStats ? table_info($pdo, 'opponent_match_player_stats') : [];
 
-  $hasPalStats      = table_exists($pdo, 'match_player_stats');
-  $palStatsInfo     = $hasPalStats ? table_info($pdo, 'match_player_stats') : [];
-
-  $hasOppStats      = table_exists($pdo, 'opponent_match_player_stats');
-  $oppStatsInfo     = $hasOppStats ? table_info($pdo, 'opponent_match_player_stats') : [];
-
-  // matches: home/away ou fallback home_team/away_team
   $colHome = pick_col($matchesInfo, ['home','home_team']);
   $colAway = pick_col($matchesInfo, ['away','away_team']);
   $colHomeScore = pick_col($matchesInfo, ['home_score','home_goals']);
   $colAwayScore = pick_col($matchesInfo, ['away_score','away_goals']);
 
-  if (!$colHome || !$colAway) redirect('?page=create_match&err=exception');
+  if (!$colHome || !$colAway) redirect(current_match_form_url('err=exception'));
 
   try {
     $pdo->beginTransaction();
 
-    // Monta matchData com o que existir no schema (mantém compatibilidade)
     $matchData = [];
+    add_user_id_if_exists($pdo, 'matches', $matchData, $userId);
 
     if (isset($matchesInfo['season'])) $matchData['season'] = $season;
     if (isset($matchesInfo['competition'])) $matchData['competition'] = $competition;
-
     if (isset($matchesInfo['match_date'])) $matchData['match_date'] = $date;
     elseif (isset($matchesInfo['date'])) $matchData['date'] = $date;
 
@@ -848,61 +996,87 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     if ($colAwayScore) $matchData[$colAwayScore] = ($away_score_raw==='' ? null : (int)$away_score_raw);
 
     $now = date('Y-m-d H:i:s');
-
-    // Modo edição: se vier match_id, faz UPDATE e regrava dependências
     $editMatchId = to_int(postv('match_id'), 0);
     $isEdit = ($editMatchId > 0);
 
     if ($isEdit) {
-      // created_at não deve ser alterado ao editar
-      if (isset($matchesInfo['updated_at'])) $matchData['updated_at'] = $now;
+      $checkSql = "SELECT id FROM matches WHERE id = ?";
+      $checkParams = [$editMatchId];
+      if (has_user_id_col($pdo, 'matches')) {
+        $checkSql .= " AND user_id = ?";
+        $checkParams[] = $userId;
+      }
+      $exists = q($pdo, $checkSql, $checkParams)->fetchColumn();
+      if (!$exists) {
+        throw new RuntimeException('Partida inválida para edição.');
+      }
 
-      $mCols = array_keys($matchData);
-      $set = implode(',', array_map(fn($c) => $c.'=?', $mCols));
-      q($pdo, "UPDATE matches SET $set WHERE id = ?", array_merge(array_values($matchData), [$editMatchId]));
+      if (isset($matchesInfo['updated_at'])) $matchData['updated_at'] = $now;
+      update_dynamic(
+        $pdo,
+        'matches',
+        $matchData,
+        has_user_id_col($pdo, 'matches') ? 'id = ? AND user_id = ?' : 'id = ?',
+        has_user_id_col($pdo, 'matches') ? [$editMatchId, $userId] : [$editMatchId]
+      );
       $matchId = $editMatchId;
 
-      // remove dados antigos para regravar exatamente o que está no formulário
-      q($pdo, "DELETE FROM match_players WHERE match_id = ?", [$matchId]);
-      if (table_exists($pdo, 'match_player_stats')) q($pdo, "DELETE FROM match_player_stats WHERE match_id = ?", [$matchId]);
-      if (table_exists($pdo, 'opponent_match_player_stats')) q($pdo, "DELETE FROM opponent_match_player_stats WHERE match_id = ?", [$matchId]);
-      if (table_exists($pdo, 'match_substitutions')) q($pdo, "DELETE FROM match_substitutions WHERE match_id = ?", [$matchId]);
+      $delParams = [$matchId];
+      $delSuffix = '';
+      if (has_user_id_col($pdo, 'match_players')) { $delSuffix = ' AND user_id = ?'; $delParams[] = $userId; }
+      q($pdo, "DELETE FROM match_players WHERE match_id = ?{$delSuffix}", $delParams);
 
+      if (table_exists($pdo, 'match_player_stats')) {
+        $params = [$matchId];
+        $suffix = has_user_id_col($pdo, 'match_player_stats') ? ' AND user_id = ?' : '';
+        if ($suffix !== '') $params[] = $userId;
+        q($pdo, "DELETE FROM match_player_stats WHERE match_id = ?{$suffix}", $params);
+      }
+
+      if (table_exists($pdo, 'opponent_match_player_stats')) {
+        $params = [$matchId];
+        $suffix = has_user_id_col($pdo, 'opponent_match_player_stats') ? ' AND user_id = ?' : '';
+        if ($suffix !== '') $params[] = $userId;
+        q($pdo, "DELETE FROM opponent_match_player_stats WHERE match_id = ?{$suffix}", $params);
+      }
+
+      if (table_exists($pdo, 'match_substitutions')) {
+        $params = [$matchId];
+        $suffix = has_user_id_col($pdo, 'match_substitutions') ? ' AND user_id = ?' : '';
+        if ($suffix !== '') $params[] = $userId;
+        q($pdo, "DELETE FROM match_substitutions WHERE match_id = ?{$suffix}", $params);
+      }
     } else {
       if (isset($matchesInfo['created_at'])) $matchData['created_at'] = $now;
       if (isset($matchesInfo['updated_at'])) $matchData['updated_at'] = $now;
-
-      $mCols = array_keys($matchData);
-      $mPh   = array_fill(0, count($mCols), '?');
-      q($pdo, "INSERT INTO matches(".implode(',', $mCols).") VALUES(".implode(',', $mPh).")", array_values($matchData));
+      insert_dynamic($pdo, 'matches', $matchData);
       $matchId = (int)$pdo->lastInsertId();
     }
 
+    $mpInfo = table_info($pdo, 'match_players');
+    $oppInfo = table_info($pdo, 'opponent_players');
 
-    // Prepared statements
-    $insMatchPlayers = $pdo->prepare("
-      INSERT INTO match_players(match_id, club_name, player_id, opponent_player_id, role, position, sort_order, entered, player_type)
-      VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ");
-
-    $selOpp = $pdo->prepare("SELECT id FROM opponent_players WHERE club_name=? COLLATE NOCASE AND name=? COLLATE NOCASE LIMIT 1");
-    $insOpp = $pdo->prepare("INSERT INTO opponent_players(club_name, name, is_active, primary_position) VALUES(?, ?, 1, ?)");
-
-    // Palmeiras roster
     foreach ($palRows as $r) {
-      $insMatchPlayers->execute([$matchId, $club, (int)$r['player_id'], null, $r['role'], $r['position'], (int)$r['sort_order'], ($r['role']==='STARTER'?1:0), $palType]);
+      $data = [];
+      add_user_id_if_exists($pdo, 'match_players', $data, $userId);
+      if (isset($mpInfo['match_id'])) $data['match_id'] = $matchId;
+      if (isset($mpInfo['club_name'])) $data['club_name'] = $club;
+      if (isset($mpInfo['player_id'])) $data['player_id'] = (int)$r['player_id'];
+      if (isset($mpInfo['opponent_player_id'])) $data['opponent_player_id'] = null;
+      if (isset($mpInfo['role'])) $data['role'] = $r['role'];
+      if (isset($mpInfo['position'])) $data['position'] = $r['position'];
+      if (isset($mpInfo['sort_order'])) $data['sort_order'] = (int)$r['sort_order'];
+      if (isset($mpInfo['entered'])) $data['entered'] = ($r['role']==='STARTER'?1:0);
+      if (isset($mpInfo['player_type'])) $data['player_type'] = $palType;
+      insert_dynamic($pdo, 'match_players', $data);
 
-      // match_player_stats (criar linha default)
       if ($hasPalStats && isset($palStatsInfo['match_id']) && isset($palStatsInfo['player_id'])) {
-
-        $data = [
-          'match_id'  => $matchId,
-          'player_id' => (int)$r['player_id'],
-        ];
-
+        $data = [];
+        add_user_id_if_exists($pdo, 'match_player_stats', $data, $userId);
+        $data['match_id']  = $matchId;
+        $data['player_id'] = (int)$r['player_id'];
         if (isset($palStatsInfo['club_name'])) $data['club_name'] = $club;
 
-        // valores vindos do formulário (GC = gols contra do jogador)
         $gf = (int)($r['goals_for'] ?? 0);
         $ga = (int)($r['goals_against'] ?? 0);
         $as = (int)($r['assists'] ?? 0);
@@ -916,54 +1090,67 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         if (isset($palStatsInfo['assists']))       $data['assists'] = $as;
         if (isset($palStatsInfo['yellow_cards']))  $data['yellow_cards'] = $yc;
         if (isset($palStatsInfo['red_cards']))     $data['red_cards'] = $rc;
-        if (isset($palStatsInfo['rating']))        $data['rating'] = $rt;   // NOT NULL em alguns schemas
+        if (isset($palStatsInfo['rating']))        $data['rating'] = $rt;
         if (isset($palStatsInfo['motm']))          $data['motm'] = $motm;
+        if (isset($palStatsInfo['is_mvp']))        $data['is_mvp'] = $motm;
 
-        // preencher NOT NULL sem default (fallback seguro)
         foreach ($palStatsInfo as $col => $meta) {
           if ($col === 'id') continue;
           if ((int)$meta['notnull'] === 1 && !array_key_exists($col, $data)) {
             if ($meta['dflt'] !== null) continue;
             $t = strtoupper((string)$meta['type']);
-            if (str_contains($t, 'INT')) $data[$col] = 0;
-            else $data[$col] = '';
+            $data[$col] = str_contains($t, 'INT') ? 0 : '';
           }
         }
 
-        $cols = array_keys($data);
-        $ph   = array_fill(0, count($cols), '?');
-        $pdo->prepare("INSERT INTO match_player_stats(".implode(',', $cols).") VALUES(".implode(',', $ph).")")
-            ->execute(array_values($data));
+        insert_dynamic($pdo, 'match_player_stats', $data);
       }
     }
 
-    // Adversário roster (+ opponent_players)
     foreach ($oppRows as $r) {
       $name = trim((string)$r['name']);
       if ($name === '') continue;
 
-      $selOpp->execute([$oppClub, $name]);
-      $oppId = (int)($selOpp->fetchColumn() ?: 0);
+      $sql = "SELECT id FROM opponent_players WHERE club_name = ? COLLATE NOCASE AND name = ? COLLATE NOCASE";
+      $params = [$oppClub, $name];
+      if (has_user_id_col($pdo, 'opponent_players')) {
+        $sql .= " AND user_id = ?";
+        $params[] = $userId;
+      }
+      $sql .= " LIMIT 1";
+      $oppId = (int)(q($pdo, $sql, $params)->fetchColumn() ?: 0);
 
       if ($oppId <= 0) {
-        $insOpp->execute([$oppClub, $name, $r['position']]);
+        $data = [];
+        add_user_id_if_exists($pdo, 'opponent_players', $data, $userId);
+        if (isset($oppInfo['club_name'])) $data['club_name'] = $oppClub;
+        if (isset($oppInfo['name'])) $data['name'] = $name;
+        if (isset($oppInfo['is_active'])) $data['is_active'] = 1;
+        if (isset($oppInfo['primary_position'])) $data['primary_position'] = $r['position'];
+        insert_dynamic($pdo, 'opponent_players', $data);
         $oppId = (int)$pdo->lastInsertId();
       }
 
-      $insMatchPlayers->execute([$matchId, $oppClub, null, $oppId, $r['role'], $r['position'], (int)$r['sort_order'], ($r['role']==='STARTER'?1:0), $oppType]);
+      $data = [];
+      add_user_id_if_exists($pdo, 'match_players', $data, $userId);
+      if (isset($mpInfo['match_id'])) $data['match_id'] = $matchId;
+      if (isset($mpInfo['club_name'])) $data['club_name'] = $oppClub;
+      if (isset($mpInfo['player_id'])) $data['player_id'] = null;
+      if (isset($mpInfo['opponent_player_id'])) $data['opponent_player_id'] = $oppId;
+      if (isset($mpInfo['role'])) $data['role'] = $r['role'];
+      if (isset($mpInfo['position'])) $data['position'] = $r['position'];
+      if (isset($mpInfo['sort_order'])) $data['sort_order'] = (int)$r['sort_order'];
+      if (isset($mpInfo['entered'])) $data['entered'] = ($r['role']==='STARTER'?1:0);
+      if (isset($mpInfo['player_type'])) $data['player_type'] = $oppType;
+      insert_dynamic($pdo, 'match_players', $data);
 
-      // opponent_match_player_stats (corrigido: club_name NOT NULL)
       if ($hasOppStats && isset($oppStatsInfo['match_id']) && isset($oppStatsInfo['opponent_player_id'])) {
-
-        $data = [
-          'match_id' => $matchId,
-          'opponent_player_id' => $oppId,
-        ];
-
-        // ✅ seu erro: club_name é NOT NULL
+        $data = [];
+        add_user_id_if_exists($pdo, 'opponent_match_player_stats', $data, $userId);
+        $data['match_id'] = $matchId;
+        $data['opponent_player_id'] = $oppId;
         if (isset($oppStatsInfo['club_name'])) $data['club_name'] = $oppClub;
 
-        // valores vindos do formulário (GC = gols contra do jogador)
         $gf = (int)($r['goals_for'] ?? 0);
         $ga = (int)($r['goals_against'] ?? 0);
         $as = (int)($r['assists'] ?? 0);
@@ -977,63 +1164,57 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         if (isset($oppStatsInfo['assists']))       $data['assists'] = $as;
         if (isset($oppStatsInfo['yellow_cards']))  $data['yellow_cards'] = $yc;
         if (isset($oppStatsInfo['red_cards']))     $data['red_cards'] = $rc;
-        if (isset($oppStatsInfo['rating']))        $data['rating'] = $rt;   // NOT NULL em alguns schemas
+        if (isset($oppStatsInfo['rating']))        $data['rating'] = $rt;
         if (isset($oppStatsInfo['motm']))          $data['motm'] = $motm;
+        if (isset($oppStatsInfo['is_mvp']))        $data['is_mvp'] = $motm;
+        if (isset($oppStatsInfo['role']))          $data['role'] = $r['role'];
+        if (isset($oppStatsInfo['position']))      $data['position'] = $r['position'];
+        if (isset($oppStatsInfo['sort_order']))    $data['sort_order'] = (int)$r['sort_order'];
+        if (isset($oppStatsInfo['entered']))       $data['entered'] = 1;
+        if (isset($oppStatsInfo['player_name']))   $data['player_name'] = $name;
+        if (isset($oppStatsInfo['name']))          $data['name'] = $name;
 
-        // campos comuns que podem existir / ser NOT NULL
-        if (isset($oppStatsInfo['role'])) $data['role'] = $r['role'];
-        if (isset($oppStatsInfo['position'])) $data['position'] = $r['position'];
-        if (isset($oppStatsInfo['sort_order'])) $data['sort_order'] = (int)$r['sort_order'];
-        if (isset($oppStatsInfo['entered'])) $data['entered'] = 1;
-
-        // preencher NOT NULL sem default (fallback seguro)
         foreach ($oppStatsInfo as $col => $meta) {
           if ($col === 'id') continue;
           if ((int)$meta['notnull'] === 1 && !array_key_exists($col, $data)) {
             if ($meta['dflt'] !== null) continue;
             $t = strtoupper((string)$meta['type']);
-            if (str_contains($t, 'INT')) $data[$col] = 0;
-            else $data[$col] = '';
+            $data[$col] = str_contains($t, 'INT') ? 0 : '';
           }
         }
 
-        $cols = array_keys($data);
-        $ph   = array_fill(0, count($cols), '?');
-        $pdo->prepare("INSERT INTO opponent_match_player_stats(".implode(',', $cols).") VALUES(".implode(',', $ph).")")
-            ->execute(array_values($data));
+        insert_dynamic($pdo, 'opponent_match_player_stats', $data);
       }
     }
 
-    // Substituições (persistência)
     ensure_match_substitutions_table($pdo);
-    q($pdo, "DELETE FROM match_substitutions WHERE match_id=?", [$matchId]);
+    $params = [$matchId];
+    $suffix = has_user_id_col($pdo, 'match_substitutions') ? ' AND user_id = ?' : '';
+    if ($suffix !== '') $params[] = $userId;
+    q($pdo, "DELETE FROM match_substitutions WHERE match_id = ?{$suffix}", $params);
 
-    $insSub = $pdo->prepare("
-      INSERT INTO match_substitutions(
-        match_id, side, minute,
-        player_out_id, player_in_id,
-        opponent_out_id, opponent_in_id,
-        sort_order
-      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
-    ");
-
-    // Palmeiras (ids)
     foreach ($subsPal as $s) {
-      $insSub->execute([
-        $matchId,
-        $palType,
-        $s['minute'],
-        (int)$s['out'],
-        (int)$s['in'],
-        null,
-        null,
-        (int)$s['sort'],
-      ]);
+      $data = [];
+      add_user_id_if_exists($pdo, 'match_substitutions', $data, $userId);
+      $data['match_id'] = $matchId;
+      $data['side'] = $palType;
+      $data['minute'] = $s['minute'];
+      $data['player_out_id'] = (int)$s['out'];
+      $data['player_in_id'] = (int)$s['in'];
+      $data['opponent_out_id'] = null;
+      $data['opponent_in_id'] = null;
+      $data['sort_order'] = (int)$s['sort'];
+      insert_dynamic($pdo, 'match_substitutions', $data);
     }
 
-    // Mapa nome->id do adversário (já criado/garantido acima)
     $oppIdByName = [];
-    $oppRowsAll = q($pdo, "SELECT id, name FROM opponent_players WHERE club_name=? COLLATE NOCASE", [$oppClub])->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $oppRowsAllSql = "SELECT id, name FROM opponent_players WHERE club_name=? COLLATE NOCASE";
+    $oppRowsAllParams = [$oppClub];
+    if (has_user_id_col($pdo, 'opponent_players')) {
+      $oppRowsAllSql .= " AND user_id = ?";
+      $oppRowsAllParams[] = $userId;
+    }
+    $oppRowsAll = q($pdo, $oppRowsAllSql, $oppRowsAllParams)->fetchAll(PDO::FETCH_ASSOC) ?: [];
     foreach ($oppRowsAll as $o) {
       $nm = strtolower(trim((string)($o['name'] ?? '')));
       if ($nm !== '') $oppIdByName[$nm] = (int)($o['id'] ?? 0);
@@ -1046,32 +1227,39 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
       $inId   = (int)($oppIdByName[$inKey] ?? 0);
 
       if ($outId <= 0 || $inId <= 0) {
-        // fallback: tenta resolver na hora
-        $selOpp->execute([$oppClub, (string)$s['out_name']]);
-        $outId = (int)($selOpp->fetchColumn() ?: 0);
-        $selOpp->execute([$oppClub, (string)$s['in_name']]);
-        $inId  = (int)($selOpp->fetchColumn() ?: 0);
+        $sql = "SELECT id FROM opponent_players WHERE club_name=? COLLATE NOCASE AND name=? COLLATE NOCASE";
+        $params = [$oppClub, (string)$s['out_name']];
+        if (has_user_id_col($pdo, 'opponent_players')) {
+          $sql .= " AND user_id=?";
+          $params[] = $userId;
+        }
+        $sql .= " LIMIT 1";
+        $outId = (int)(q($pdo, $sql, $params)->fetchColumn() ?: 0);
+
+        $params = [$oppClub, (string)$s['in_name']];
+        if (has_user_id_col($pdo, 'opponent_players')) $params[] = $userId;
+        $inId = (int)(q($pdo, $sql, $params)->fetchColumn() ?: 0);
       }
 
-      $insSub->execute([
-        $matchId,
-        $oppType,
-        $s['minute'],
-        null,
-        null,
-        $outId ?: null,
-        $inId ?: null,
-        (int)$s['sort'],
-      ]);
+      $data = [];
+      add_user_id_if_exists($pdo, 'match_substitutions', $data, $userId);
+      $data['match_id'] = $matchId;
+      $data['side'] = $oppType;
+      $data['minute'] = $s['minute'];
+      $data['player_out_id'] = null;
+      $data['player_in_id'] = null;
+      $data['opponent_out_id'] = $outId ?: null;
+      $data['opponent_in_id'] = $inId ?: null;
+      $data['sort_order'] = (int)$s['sort'];
+      insert_dynamic($pdo, 'match_substitutions', $data);
     }
 
     $pdo->commit();
     redirect('/?page=match&id='.$matchId);
-
   } catch (Throwable $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
     pm_log('ERROR', 'create_match FAIL: '.$e->getMessage());
-    redirect('?page=create_match&err=exception');
+    redirect(current_match_form_url('err=exception'));
   }
 }
 
@@ -1179,7 +1367,6 @@ echo '</div></div>';
 
 echo '<div class="row g-4">';
 
-// Palmeiras
 echo '<div class="col-12 col-xl-6"><div class="card-soft p-3">';
 echo '<h5 class="mb-2">'.h($club).'</h5>';
 
@@ -1206,7 +1393,6 @@ render_subs_block('pal', 'Substituições (até 5)');
 
 echo '</div></div>';
 
-// Adversário
 $homeVal = fval('home',$club);
 $awayVal = fval('away','ADVERSÁRIO');
 $oppTitle = (strcasecmp($homeVal, $club) === 0) ? $awayVal : $homeVal;
@@ -1216,7 +1402,6 @@ echo '<h5 class="mb-3">'.h($oppTitle).'</h5>';
 render_table_create(false, 'starter', $MAX_STARTERS, $positions, $palPlayers, $mvpSelected);
 render_table_create(false, 'bench',   $MAX_BENCH,    $positions, $palPlayers, $mvpSelected);
 render_subs_block('opp', 'Substituições (até 5)');
-
 echo '</div></div>';
 
 echo '</div>';
@@ -1227,7 +1412,6 @@ echo '<div class="text-end mt-3">
 
 echo '</form>';
 
-// Preenche as listas de substituições com base nos titulares/reservas (sem alterar o padrão visual)
 echo '<script>
 (function(){
   function clearAndKeepEmpty(sel){
@@ -1326,7 +1510,6 @@ echo '<script>
   }
 
   function bind(){
-    // Palmeiras selects
     for (var i=0;i<11;i++){
       var s = document.querySelector("select[name=\\"pal_pid_starter_" + i + "\\"]");
       if(s) s.addEventListener("change", function(){ refresh("pal"); });
@@ -1336,7 +1519,6 @@ echo '<script>
       if(b) b.addEventListener("change", function(){ refresh("pal"); });
     }
 
-    // Adversário inputs
     for (var i2=0;i2<11;i2++){
       var is = document.querySelector("input[name=\\"opp_name_starter_" + i2 + "\\"]");
       if(is) is.addEventListener("input", function(){ refresh("opp"); });
@@ -1354,6 +1536,3 @@ echo '<script>
 </script>';
 
 render_footer();
-
-
-

@@ -3,8 +3,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../db.php';
 
-$pdo  = db();
-$club = app_club();
+$pdo    = db();
+$userId = require_user_id();
+$club   = app_club();
 
 $action = (string)($_GET['action'] ?? '');
 $msg    = (string)($_GET['msg'] ?? '');
@@ -21,28 +22,93 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'delete') {
     redirect('/?page=matches&err=invalid');
   }
 
-  // Garante que a partida existe e envolve o clube atual
-  $m = q($pdo, "SELECT id, home, away FROM matches WHERE id = ? LIMIT 1", [$matchId])->fetch();
+  // Garante que a partida existe, pertence ao usuário e envolve o clube atual
+  $m = q(
+    $pdo,
+    "SELECT id, home, away
+     FROM matches
+     WHERE id = :id
+       AND user_id = :user_id
+     LIMIT 1",
+    [
+      ':id'      => $matchId,
+      ':user_id' => $userId,
+    ]
+  )->fetch();
+
   if (!$m) {
     redirect('/?page=matches&err=not_found');
   }
+
   if ((string)$m['home'] !== $club && (string)$m['away'] !== $club) {
     redirect('/?page=matches&err=not_allowed');
   }
 
   $pdo->beginTransaction();
   try {
-    // Apaga dependências primeiro
-    q($pdo, "DELETE FROM match_player_stats WHERE match_id = ?", [$matchId]);
-    q($pdo, "DELETE FROM match_players      WHERE match_id = ?", [$matchId]);
+    // Apaga dependências primeiro, sempre respeitando user_id
+    q(
+      $pdo,
+      "DELETE FROM match_player_stats
+       WHERE match_id = :match_id
+         AND user_id = :user_id",
+      [
+        ':match_id' => $matchId,
+        ':user_id'  => $userId,
+      ]
+    );
+
+    q(
+      $pdo,
+      "DELETE FROM match_substitutions
+       WHERE match_id = :match_id
+         AND user_id = :user_id",
+      [
+        ':match_id' => $matchId,
+        ':user_id'  => $userId,
+      ]
+    );
+
+    q(
+      $pdo,
+      "DELETE FROM opponent_match_player_stats
+       WHERE match_id = :match_id
+         AND user_id = :user_id",
+      [
+        ':match_id' => $matchId,
+        ':user_id'  => $userId,
+      ]
+    );
+
+    q(
+      $pdo,
+      "DELETE FROM match_players
+       WHERE match_id = :match_id
+         AND user_id = :user_id",
+      [
+        ':match_id' => $matchId,
+        ':user_id'  => $userId,
+      ]
+    );
 
     // Apaga a partida
-    q($pdo, "DELETE FROM matches WHERE id = ?", [$matchId]);
+    q(
+      $pdo,
+      "DELETE FROM matches
+       WHERE id = :id
+         AND user_id = :user_id",
+      [
+        ':id'      => $matchId,
+        ':user_id' => $userId,
+      ]
+    );
 
     $pdo->commit();
     redirect('/?page=matches&msg=deleted');
   } catch (Throwable $e) {
-    $pdo->rollBack();
+    if ($pdo->inTransaction()) {
+      $pdo->rollBack();
+    }
     redirect('/?page=matches&err=delete_failed');
   }
 }
@@ -66,8 +132,10 @@ if ($err === 'invalid') {
   echo '<div class="alert alert-danger card-soft">Falha ao excluir a partida. Tente novamente.</div>';
 }
 
-// Lista partidas (histórico) - trazendo season e ordenando para agrupar
-$rows = q($pdo, "
+// Lista partidas (histórico) - somente do usuário logado
+$rows = q(
+  $pdo,
+  "
   SELECT
     id,
     season,
@@ -80,12 +148,15 @@ $rows = q($pdo, "
     home_score,
     away_score
   FROM matches
+  WHERE user_id = :user_id
   ORDER BY
     (CASE WHEN season IS NULL OR season = '' THEN 0 ELSE 1 END) DESC,
     season DESC,
     match_date DESC,
     id DESC
-")->fetchAll();
+  ",
+  [':user_id' => $userId]
+)->fetchAll();
 
 // Header da página
 echo '<div class="d-flex justify-content-between align-items-center mb-3">';
@@ -108,9 +179,7 @@ function season_label($v): string {
     $t = trim($v);
     return $t !== '' ? $t : 'Sem temporada';
   }
-  // season pode vir como int/float (ex.: 2026)
   if (is_int($v) || is_float($v)) return (string)$v;
-  // qualquer outro tipo improvável
   $s = trim((string)$v);
   return $s !== '' ? $s : 'Sem temporada';
 }
@@ -120,7 +189,7 @@ function season_label($v): string {
  */
 function season_key(string $seasonLabel): string {
   $s = strtolower($seasonLabel);
-  $s = preg_replace('/[^a-z0-9]+/i', '_', $s); // <-- agora sempre string
+  $s = preg_replace('/[^a-z0-9]+/i', '_', $s);
   $s = trim($s ?? '', '_');
   return $s !== '' ? $s : 'sem_temporada';
 }
@@ -128,7 +197,7 @@ function season_key(string $seasonLabel): string {
 // Agrupar por temporada
 $grouped = [];
 foreach ($rows as $r) {
-  $seasonLabel = season_label($r['season'] ?? null); // STRING garantida
+  $seasonLabel = season_label($r['season'] ?? null);
   if (!isset($grouped[$seasonLabel])) $grouped[$seasonLabel] = [];
   $grouped[$seasonLabel][] = $r;
 }
@@ -170,9 +239,9 @@ usort($seasonLabels, function ($a, $b) {
 <?php
 // Renderizar cada temporada como uma sessão expansível, com tabela completa (thead dentro)
 foreach ($seasonLabels as $seasonLabel) {
-  $seasonLabel = (string)$seasonLabel;                 // reforço
+  $seasonLabel = (string)$seasonLabel;
   $seasonRows  = $grouped[$seasonLabel] ?? [];
-  $key         = season_key($seasonLabel);             // <-- SEM ERRO (string)
+  $key         = season_key($seasonLabel);
 
   $count = count($seasonRows);
 
@@ -205,13 +274,13 @@ foreach ($seasonLabels as $seasonLabel) {
   echo '        <tbody>';
 
   foreach ($seasonRows as $r) {
-    $id   = (int)$r['id'];
-    $date = (string)$r['match_date'];
-    $comp = (string)$r['competition'];
+    $id    = (int)$r['id'];
+    $date  = (string)$r['match_date'];
+    $comp  = (string)$r['competition'];
     $phase = (string)($r['phase'] ?? '');
     $round = (string)($r['round'] ?? '');
-    $home = (string)$r['home'];
-    $away = (string)$r['away'];
+    $home  = (string)$r['home'];
+    $away  = (string)$r['away'];
 
     $hs = $r['home_score'];
     $as = $r['away_score'];
@@ -256,6 +325,7 @@ foreach ($seasonLabels as $seasonLabel) {
     try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); }
     catch (e) { return {}; }
   }
+
   function saveStates(states) {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(states)); } catch (e) {}
   }
@@ -273,6 +343,7 @@ foreach ($seasonLabels as $seasonLabel) {
   function toggle(seasonKey) {
     const head = document.querySelector('.season-head[data-season="' + seasonKey + '"]');
     if (!head) return;
+
     const expanded = head.getAttribute('aria-expanded') === 'true';
     setExpanded(seasonKey, !expanded);
 
@@ -310,6 +381,3 @@ foreach ($seasonLabels as $seasonLabel) {
 
 <?php
 render_footer();
-
-
-

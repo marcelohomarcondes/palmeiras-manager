@@ -4,11 +4,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../db.php';
 
-// PDO padronizado
-$pdo = db();
-
-// Clube (sem helper inexistente)
-$club = 'PALMEIRAS';
+$pdo    = db();
+$userId = require_user_id();
+$club   = app_club();
 
 // -----------------------------------------------------------------------------
 // Helpers
@@ -32,10 +30,18 @@ function table_exists(PDO $pdo, string $table): bool {
 function table_columns(PDO $pdo, string $table): array {
   $cols = [];
   $st = $pdo->query("PRAGMA table_info($table)");
-  foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+  foreach (($st ? $st->fetchAll(PDO::FETCH_ASSOC) : []) as $r) {
     $cols[] = (string)$r['name'];
   }
   return $cols;
+}
+
+function has_user_id_col(PDO $pdo, string $table): bool {
+  static $cache = [];
+  if (!array_key_exists($table, $cache)) {
+    $cache[$table] = in_array('user_id', table_columns($pdo, $table), true);
+  }
+  return $cache[$table];
 }
 
 function render_table(array $headers, array $rows, array $keys, int $colspanIfEmpty): void {
@@ -85,13 +91,18 @@ if (!function_exists('render_table_scroll')) {
 }
 
 if (!function_exists('pm_stats_real_participation_sql')) {
-  function pm_stats_real_participation_sql(string $clubNormExpr): string {
+  function pm_stats_real_participation_sql(string $clubNormExpr, bool $mpHasUserId, bool $msHasUserId, bool $mxHasUserId): string {
+    $mpUser = $mpHasUserId ? " AND mp.user_id = :user_id " : '';
+    $msUser = $msHasUserId ? " AND ms.user_id = :user_id " : '';
+    $mxUser = $mxHasUserId ? " AND mx.user_id = :user_id " : '';
+
     return "
       SELECT DISTINCT mp.match_id, mp.player_id
       FROM match_players mp
       WHERE UPPER(TRIM(mp.club_name)) = $clubNormExpr
         AND UPPER(TRIM(COALESCE(mp.role,''))) = 'STARTER'
         AND mp.player_id IS NOT NULL
+        $mpUser
 
       UNION
 
@@ -99,6 +110,8 @@ if (!function_exists('pm_stats_real_participation_sql')) {
       FROM match_substitutions ms
       JOIN matches mx ON mx.id = ms.match_id
       WHERE ms.player_in_id IS NOT NULL
+        $msUser
+        $mxUser
         AND (
           (UPPER(TRIM(mx.home)) = $clubNormExpr AND UPPER(TRIM(COALESCE(ms.side,''))) = 'HOME')
           OR
@@ -113,7 +126,6 @@ if (!function_exists('pm_stats_is_goalkeeper_expr')) {
     return "UPPER(TRIM(COALESCE($positionExpr,''))) IN ('GK','GOL','GOLEIRO')";
   }
 }
-
 
 function compute_streaks(array $matches): array {
   $best = [
@@ -195,16 +207,42 @@ function compute_streaks(array $matches): array {
 }
 
 // -----------------------------------------------------------------------------
+// Preparação de user_id nas tabelas relevantes
+// -----------------------------------------------------------------------------
+$matchesHasUserId = has_user_id_col($pdo, 'matches');
+$playersHasUserId = has_user_id_col($pdo, 'players');
+$matchPlayersHasUserId = table_exists($pdo, 'match_players') && has_user_id_col($pdo, 'match_players');
+$matchSubsHasUserId = table_exists($pdo, 'match_substitutions') && has_user_id_col($pdo, 'match_substitutions');
+$matchPlayerStatsHasUserId = table_exists($pdo, 'match_player_stats') && has_user_id_col($pdo, 'match_player_stats');
+
+$realParticipationSql = pm_stats_real_participation_sql(
+  "UPPER(TRIM(:club))",
+  $matchPlayersHasUserId,
+  $matchSubsHasUserId,
+  $matchesHasUserId
+);
+
+// -----------------------------------------------------------------------------
 // Filtros
 // -----------------------------------------------------------------------------
 $season      = trim((string)($_GET['season'] ?? ''));
 $competition = trim((string)($_GET['competition'] ?? ''));
 
-// SQL base (case-insensitive)
 $bind = [':club' => $club];
+if ($matchesHasUserId) $bind[':user_id'] = $userId;
+
 $where = [];
-if ($season !== '') { $where[] = "UPPER(TRIM(m.season)) = UPPER(TRIM(:season))"; $bind[':season'] = $season; }
-if ($competition !== '') { $where[] = "UPPER(TRIM(m.competition)) = UPPER(TRIM(:competition))"; $bind[':competition'] = $competition; }
+if ($matchesHasUserId) {
+  $where[] = "m.user_id = :user_id";
+}
+if ($season !== '') {
+  $where[] = "UPPER(TRIM(m.season)) = UPPER(TRIM(:season))";
+  $bind[':season'] = $season;
+}
+if ($competition !== '') {
+  $where[] = "UPPER(TRIM(m.competition)) = UPPER(TRIM(:competition))";
+  $bind[':competition'] = $competition;
+}
 $whereSql = $where ? ("WHERE " . implode(" AND ", $where)) : "";
 
 $clubNorm = "UPPER(TRIM(:club))";
@@ -215,17 +253,38 @@ $clubGF = "CASE WHEN $homeNorm = $clubNorm THEN COALESCE(m.home_score,0) ELSE CO
 $clubGA = "CASE WHEN $homeNorm = $clubNorm THEN COALESCE(m.away_score,0) ELSE COALESCE(m.home_score,0) END";
 $opponent = "CASE WHEN $homeNorm = $clubNorm THEN m.away ELSE m.home END";
 $isHome = "CASE WHEN $homeNorm = $clubNorm THEN 1 ELSE 0 END";
-$realParticipationSql = pm_stats_real_participation_sql($clubNorm);
 
 $seasonOptions = [];
-$st = $pdo->prepare("\n  SELECT DISTINCT TRIM(m.season) AS season\n  FROM matches m\n  WHERE $isClubInMatch AND TRIM(COALESCE(m.season,'')) <> ''\n  ORDER BY CAST(TRIM(m.season) AS INTEGER) DESC, TRIM(m.season) DESC\n");
-$st->execute([':club' => $club]);
+$seasonSql = "
+  SELECT DISTINCT TRIM(m.season) AS season
+  FROM matches m
+  WHERE " . ($matchesHasUserId ? "m.user_id = :user_id AND " : "") . "
+        $isClubInMatch
+        AND TRIM(COALESCE(m.season,'')) <> ''
+  ORDER BY CAST(TRIM(m.season) AS INTEGER) DESC, TRIM(m.season) DESC
+";
+$st = $pdo->prepare($seasonSql);
+$seasonBind = [':club' => $club];
+if ($matchesHasUserId) $seasonBind[':user_id'] = $userId;
+$st->execute($seasonBind);
 $seasonOptions = array_map(static fn(array $r): string => (string)$r['season'], $st->fetchAll(PDO::FETCH_ASSOC) ?: []);
 
 $compBind = [':club' => $club];
-$compWhere = ["$isClubInMatch", "TRIM(COALESCE(m.competition,'')) <> ''"];
-if ($season !== '') { $compWhere[] = "UPPER(TRIM(m.season)) = UPPER(TRIM(:season))"; $compBind[':season'] = $season; }
-$st = $pdo->prepare("\n  SELECT DISTINCT TRIM(m.competition) AS competition\n  FROM matches m\n  WHERE " . implode(' AND ', $compWhere) . "\n  ORDER BY TRIM(m.competition) ASC\n");
+if ($matchesHasUserId) $compBind[':user_id'] = $userId;
+$compWhere = [];
+if ($matchesHasUserId) $compWhere[] = "m.user_id = :user_id";
+$compWhere[] = $isClubInMatch;
+$compWhere[] = "TRIM(COALESCE(m.competition,'')) <> ''";
+if ($season !== '') {
+  $compWhere[] = "UPPER(TRIM(m.season)) = UPPER(TRIM(:season))";
+  $compBind[':season'] = $season;
+}
+$st = $pdo->prepare("
+  SELECT DISTINCT TRIM(m.competition) AS competition
+  FROM matches m
+  WHERE " . implode(' AND ', $compWhere) . "
+  ORDER BY TRIM(m.competition) ASC
+");
 $st->execute($compBind);
 $competitionOptions = array_map(static fn(array $r): string => (string)$r['competition'], $st->fetchAll(PDO::FETCH_ASSOC) ?: []);
 
@@ -238,12 +297,12 @@ $sqlMatches = "
     m.match_date,
     m.season,
     m.competition,
-    COALESCE(m.phase,'')   AS phase,
-    COALESCE(m.round,'')   AS round,
-    COALESCE(m.stadium,'') AS stadium,
-    COALESCE(m.referee,'') AS referee,
+    COALESCE(m.phase,'')    AS phase,
+    COALESCE(m.round,'')    AS round,
+    COALESCE(m.stadium,'')  AS stadium,
+    COALESCE(m.referee,'')  AS referee,
     COALESCE(m.kit_used,'') AS kit_used,
-    COALESCE(m.weather,'') AS weather,
+    COALESCE(m.weather,'')  AS weather,
     m.home, m.away,
     COALESCE(m.home_score,0) AS home_score,
     COALESCE(m.away_score,0) AS away_score,
@@ -412,13 +471,14 @@ $weatherRank = array_slice($weatherRank, 0, 15);
 // -----------------------------------------------------------------------------
 // Player stats
 // -----------------------------------------------------------------------------
+$topGames100 = [];
 $sqlTopGames = "
   SELECT p.name AS player_name, COUNT(DISTINCT part.match_id) AS games
   FROM (
     $realParticipationSql
   ) part
-  JOIN players p ON p.id = part.player_id
-  JOIN matches m ON m.id = part.match_id
+  JOIN players p ON p.id = part.player_id " . ($playersHasUserId ? "AND p.user_id = :user_id " : "") . "
+  JOIN matches m ON m.id = part.match_id " . ($matchesHasUserId ? "AND m.user_id = :user_id " : "") . "
   $whereSql
   " . ($whereSql ? "AND" : "WHERE") . " $isClubInMatch
   GROUP BY part.player_id
@@ -429,28 +489,32 @@ $st = $pdo->prepare($sqlTopGames);
 $st->execute($bind);
 $topGames100 = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-$sqlCleanSheets = "
-  SELECT p.name AS player_name, COUNT(DISTINCT part.match_id) AS clean_sheets
-  FROM (
-    $realParticipationSql
-  ) part
-  JOIN players p ON p.id = part.player_id
-  JOIN matches m ON m.id = part.match_id
-  LEFT JOIN match_players mpg
-    ON mpg.match_id = part.match_id
-   AND mpg.player_id = part.player_id
-   AND UPPER(TRIM(mpg.club_name)) = $clubNorm
-  $whereSql
-  " . ($whereSql ? "AND" : "WHERE") . " $isClubInMatch
-    AND ($clubGA) = 0
-    AND " . pm_stats_is_goalkeeper_expr("COALESCE(mpg.position, p.primary_position)") . "
-  GROUP BY part.player_id
-  ORDER BY clean_sheets DESC, player_name ASC
-  LIMIT 10
-";
-$st = $pdo->prepare($sqlCleanSheets);
-$st->execute($bind);
-$topCleanSheets = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+$topCleanSheets = [];
+if (table_exists($pdo, 'match_players')) {
+  $sqlCleanSheets = "
+    SELECT p.name AS player_name, COUNT(DISTINCT part.match_id) AS clean_sheets
+    FROM (
+      $realParticipationSql
+    ) part
+    JOIN players p ON p.id = part.player_id " . ($playersHasUserId ? "AND p.user_id = :user_id " : "") . "
+    JOIN matches m ON m.id = part.match_id " . ($matchesHasUserId ? "AND m.user_id = :user_id " : "") . "
+    LEFT JOIN match_players mpg
+      ON mpg.match_id = part.match_id
+     AND mpg.player_id = part.player_id
+     " . ($matchPlayersHasUserId ? "AND mpg.user_id = :user_id" : "") . "
+     AND UPPER(TRIM(mpg.club_name)) = $clubNorm
+    $whereSql
+    " . ($whereSql ? "AND" : "WHERE") . " $isClubInMatch
+      AND ($clubGA) = 0
+      AND " . pm_stats_is_goalkeeper_expr("COALESCE(mpg.position, p.primary_position)") . "
+    GROUP BY part.player_id
+    ORDER BY clean_sheets DESC, player_name ASC
+    LIMIT 10
+  ";
+  $st = $pdo->prepare($sqlCleanSheets);
+  $st->execute($bind);
+  $topCleanSheets = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
 
 // Consecutivos
 $topConsecutiveGames = [];
@@ -466,7 +530,9 @@ if ($matches) {
     WHERE part.match_id IN ($matchIdList)
   ";
   $st = $pdo->prepare($sqlPlays);
-  $st->execute([':club' => $club]);
+  $playBind = [':club' => $club];
+  if (strpos($sqlPlays, ':user_id') !== false) $playBind[':user_id'] = $userId;
+  $st->execute($playBind);
   $rows = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
   $playedByMatch = [];
@@ -493,8 +559,12 @@ if ($matches) {
   if ($best) {
     $pids = array_keys($best);
     $in2 = implode(',', array_fill(0, count($pids), '?'));
-    $st = $pdo->prepare("SELECT id, name FROM players WHERE id IN ($in2)");
-    $st->execute($pids);
+    $nameSql = "SELECT id, name FROM players WHERE id IN ($in2)";
+    if ($playersHasUserId) $nameSql .= " AND user_id = ?";
+    $st = $pdo->prepare($nameSql);
+    $params = $pids;
+    if ($playersHasUserId) $params[] = $userId;
+    $st->execute($params);
     $nameRows = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
     $names = [];
@@ -510,7 +580,7 @@ if ($matches) {
 }
 
 // -----------------------------------------------------------------------------
-// Artilheiros / Assistências (se existir match_player_stats com colunas)
+// Artilheiros / Assistências
 // -----------------------------------------------------------------------------
 $topScorers = [];
 $topAssists = [];
@@ -521,6 +591,7 @@ if (table_exists($pdo, 'match_player_stats')) {
   $goalsCol   = in_array('goals_for', $cols, true) ? 'goals_for' : (in_array('goals', $cols, true) ? 'goals' : '');
   $hasGoals   = ($goalsCol !== '');
   $hasAssists = in_array('assists', $cols, true);
+  $hasClubCol = in_array('club_name', $cols, true);
 
   if ($hasGoals || $hasAssists) {
     $mpStatsAvailable = true;
@@ -534,11 +605,12 @@ if (table_exists($pdo, 'match_player_stats')) {
         ) part
           ON part.match_id = mps.match_id
          AND part.player_id = mps.player_id
-        JOIN players p ON p.id = mps.player_id
-        JOIN matches m ON m.id = mps.match_id
+        JOIN players p ON p.id = mps.player_id " . ($playersHasUserId ? "AND p.user_id = :user_id " : "") . "
+        JOIN matches m ON m.id = mps.match_id " . ($matchesHasUserId ? "AND m.user_id = :user_id " : "") . "
         $whereSql
         " . ($whereSql ? "AND" : "WHERE") . " $isClubInMatch
-          AND UPPER(TRIM(mps.club_name)) = $clubNorm
+          " . ($matchPlayerStatsHasUserId ? "AND mps.user_id = :user_id " : "") . "
+          " . ($hasClubCol ? "AND UPPER(TRIM(mps.club_name)) = $clubNorm" : "") . "
         GROUP BY mps.player_id
         HAVING SUM(COALESCE(mps.".$goalsCol.",0)) > 0
         ORDER BY goals DESC, player_name ASC
@@ -558,11 +630,12 @@ if (table_exists($pdo, 'match_player_stats')) {
         ) part
           ON part.match_id = mps.match_id
          AND part.player_id = mps.player_id
-        JOIN players p ON p.id = mps.player_id
-        JOIN matches m ON m.id = mps.match_id
+        JOIN players p ON p.id = mps.player_id " . ($playersHasUserId ? "AND p.user_id = :user_id " : "") . "
+        JOIN matches m ON m.id = mps.match_id " . ($matchesHasUserId ? "AND m.user_id = :user_id " : "") . "
         $whereSql
         " . ($whereSql ? "AND" : "WHERE") . " $isClubInMatch
-          AND UPPER(TRIM(mps.club_name)) = $clubNorm
+          " . ($matchPlayerStatsHasUserId ? "AND mps.user_id = :user_id " : "") . "
+          " . ($hasClubCol ? "AND UPPER(TRIM(mps.club_name)) = $clubNorm" : "") . "
         GROUP BY mps.player_id
         HAVING SUM(COALESCE(mps.assists,0)) > 0
         ORDER BY assists DESC, player_name ASC
@@ -622,8 +695,7 @@ $chart = [
   ],
   'wdl' => [
     'labels' => ['Vitórias','Empates','Derrotas'],
-    'values' => [(int)$summary['wins'], (int)$summary['draws'], (int)$summary['losses'],
-    ],
+    'values' => [(int)$summary['wins'], (int)$summary['draws'], (int)$summary['losses']],
   ],
   'timeline' => [
     'labels' => [],
@@ -666,7 +738,7 @@ $chart = [
     'has_player_stats' => $mpStatsAvailable,
   ],
   'score_bubble' => [
-    'points' => [], // {x: gf, y: ga, r: radius, v: count, label: '3x0'}
+    'points' => [],
     'max_gf' => 0,
     'max_ga' => 0,
   ],
@@ -729,7 +801,6 @@ foreach ($weatherRank as $r) {
   $chart['weathers']['ppj'][] = $ppj;
 }
 
-// Players charts (top10)
 $tg = array_slice($topGames100, 0, 10);
 foreach ($tg as $r) {
   $chart['players']['games_top10']['labels'][] = (string)$r['player_name'];
@@ -758,10 +829,8 @@ if ($mpStatsAvailable) {
   }
 }
 
-// Scoreline "heatmap" (bubble)
 $maxGF = 0; $maxGA = 0;
 foreach ($scorelines as $k => $count) {
-  // k: "3x0"
   $parts = explode('x', (string)$k);
   $gf = isset($parts[0]) ? (int)$parts[0] : 0;
   $ga = isset($parts[1]) ? (int)$parts[1] : 0;
@@ -769,7 +838,6 @@ foreach ($scorelines as $k => $count) {
   $maxGF = max($maxGF, $gf);
   $maxGA = max($maxGA, $ga);
 
-  // radius: escala simples, evita sumir bolhas pequenas
   $r = 4 + min(18, (int)$count * 3);
 
   $chart['score_bubble']['points'][] = [
@@ -784,11 +852,10 @@ $chart['score_bubble']['max_gf'] = $maxGF;
 $chart['score_bubble']['max_ga'] = $maxGA;
 
 // -----------------------------------------------------------------------------
-// Render (padrão matches.php)
+// Render
 // -----------------------------------------------------------------------------
 render_header('Relatórios');
 
-// Filtro
 echo '<div class="card-soft mb-3">';
 echo '  <form method="get" class="p-3">';
 echo '    <input type="hidden" name="page" value="stats">';
@@ -819,7 +886,6 @@ echo '    <div class="text-muted mt-2">Clube: <b>'.h($club).'</b> • Partidas c
 echo '  </form>';
 echo '</div>';
 
-// Cards resumo
 echo '<div class="row g-3 mb-3">';
 
 echo '<div class="col-12 col-lg-4">';
@@ -834,8 +900,8 @@ echo '</div>';
 echo '<div class="col-12 col-lg-4">';
 echo '  <div class="card-soft p-3">';
 echo '    <h5 class="mb-2">Gols</h5>';
-echo '    <div><b>GF:</b> '.(int)$summary['gf'].'</div>';
-echo '    <div><b>GA:</b> '.(int)$summary['ga'].'</div>';
+echo '    <div><b>Gols Pró:</b> '.(int)$summary['gf'].'</div>';
+echo '    <div><b>Gols Contra:</b> '.(int)$summary['ga'].'</div>';
 echo '    <div><b>Saldo:</b> '.(int)$summary['gd'].'</div>';
 echo '  </div>';
 echo '</div>';
@@ -853,9 +919,6 @@ echo '</div>';
 
 echo '</div>';
 
-// -----------------------------------------------------------------------------
-// Painel de GRÁFICOS (todos)
-// -----------------------------------------------------------------------------
 echo '<div class="card-soft mb-3 p-3">';
 echo '  <div class="d-flex justify-content-between align-items-center mb-2">';
 echo '    <h5 class="mb-0">Gráficos</h5>';
@@ -864,7 +927,6 @@ echo '  </div>';
 
 echo '  <div class="accordion" id="accStatsCharts">';
 
-// Visão Geral
 echo '    <div class="accordion-item">';
 echo '      <h2 class="accordion-header" id="accHead1">';
 echo '        <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#accCol1" aria-expanded="true" aria-controls="accCol1">';
@@ -873,36 +935,17 @@ echo '        </button>';
 echo '      </h2>';
 echo '      <div id="accCol1" class="accordion-collapse collapse show" aria-labelledby="accHead1" data-bs-parent="#accStatsCharts">';
 echo '        <div class="accordion-body">';
-
 echo '          <div class="row g-3">';
-echo '            <div class="col-12 col-xl-8">';
-echo '              <div class="card-soft p-3">';
-echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Pontos acumulados</b><span class="text-muted small">por partida</span></div>';
-echo '                <div style="height:280px"><canvas id="ch_points"></canvas></div>';
-echo '              </div>';
-echo '            </div>';
-echo '            <div class="col-12 col-xl-4">';
-echo '              <div class="card-soft p-3">';
-echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>V / E / D</b><span class="text-muted small">distribuição</span></div>';
-echo '                <div style="height:280px"><canvas id="ch_wdl"></canvas></div>';
-echo '              </div>';
-echo '            </div>';
+echo '            <div class="col-12 col-xl-8"><div class="card-soft p-3"><div class="d-flex justify-content-between align-items-center mb-2"><b>Pontos acumulados</b><span class="text-muted small">por partida</span></div><div style="height:280px"><canvas id="ch_points"></canvas></div></div></div>';
+echo '            <div class="col-12 col-xl-4"><div class="card-soft p-3"><div class="d-flex justify-content-between align-items-center mb-2"><b>V / E / D</b><span class="text-muted small">distribuição</span></div><div style="height:280px"><canvas id="ch_wdl"></canvas></div></div></div>';
 echo '          </div>';
-
 echo '          <div class="row g-3 mt-0">';
-echo '            <div class="col-12">';
-echo '              <div class="card-soft p-3">';
-echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Saldo acumulado</b><span class="text-muted small">(GF-GA) acumulado</span></div>';
-echo '                <div style="height:260px"><canvas id="ch_gd"></canvas></div>';
-echo '              </div>';
-echo '            </div>';
+echo '            <div class="col-12"><div class="card-soft p-3"><div class="d-flex justify-content-between align-items-center mb-2"><b>Saldo acumulado</b><span class="text-muted small">(GF-GA) acumulado</span></div><div style="height:260px"><canvas id="ch_gd"></canvas></div></div></div>';
 echo '          </div>';
-
 echo '        </div>';
 echo '      </div>';
 echo '    </div>';
 
-// Ataque & Defesa
 echo '    <div class="accordion-item">';
 echo '      <h2 class="accordion-header" id="accHead2">';
 echo '        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#accCol2" aria-expanded="false" aria-controls="accCol2">';
@@ -911,36 +954,17 @@ echo '        </button>';
 echo '      </h2>';
 echo '      <div id="accCol2" class="accordion-collapse collapse" aria-labelledby="accHead2" data-bs-parent="#accStatsCharts">';
 echo '        <div class="accordion-body">';
-
 echo '          <div class="row g-3">';
-echo '            <div class="col-12">';
-echo '              <div class="card-soft p-3">';
-echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>GF e GA por jogo</b><span class="text-muted small">barras</span></div>';
-echo '                <div style="height:320px"><canvas id="ch_gfga"></canvas></div>';
-echo '              </div>';
-echo '            </div>';
+echo '            <div class="col-12"><div class="card-soft p-3"><div class="d-flex justify-content-between align-items-center mb-2"><b>Gols Pró e Gols Contra por jogo</b><span class="text-muted small">barras</span></div><div style="height:320px"><canvas id="ch_gfga"></canvas></div></div></div>';
 echo '          </div>';
-
 echo '          <div class="row g-3 mt-0">';
-echo '            <div class="col-12 col-xl-6">';
-echo '              <div class="card-soft p-3">';
-echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Placar mais comum</b><span class="text-muted small">GF x GA (bolhas)</span></div>';
-echo '                <div style="height:300px"><canvas id="ch_scorebubble"></canvas></div>';
-echo '              </div>';
-echo '            </div>';
-echo '            <div class="col-12 col-xl-6">';
-echo '              <div class="card-soft p-3">';
-echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Mandante x Visitante</b><span class="text-muted small">PPJ / GF / GA</span></div>';
-echo '                <div style="height:300px"><canvas id="ch_homeaway"></canvas></div>';
-echo '              </div>';
-echo '            </div>';
+echo '            <div class="col-12 col-xl-6"><div class="card-soft p-3"><div class="d-flex justify-content-between align-items-center mb-2"><b>Placar mais comum</b><span class="text-muted small">GF x GA (bolhas)</span></div><div style="height:300px"><canvas id="ch_scorebubble"></canvas></div></div></div>';
+echo '            <div class="col-12 col-xl-6"><div class="card-soft p-3"><div class="d-flex justify-content-between align-items-center mb-2"><b>Mandante x Visitante</b><span class="text-muted small">PPJ / GF / GA</span></div><div style="height:300px"><canvas id="ch_homeaway"></canvas></div></div></div>';
 echo '          </div>';
-
 echo '        </div>';
 echo '      </div>';
 echo '    </div>';
 
-// Contexto
 echo '    <div class="accordion-item">';
 echo '      <h2 class="accordion-header" id="accHead3">';
 echo '        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#accCol3" aria-expanded="false" aria-controls="accCol3">';
@@ -949,42 +973,18 @@ echo '        </button>';
 echo '      </h2>';
 echo '      <div id="accCol3" class="accordion-collapse collapse" aria-labelledby="accHead3" data-bs-parent="#accStatsCharts">';
 echo '        <div class="accordion-body">';
-
 echo '          <div class="row g-3">';
-echo '            <div class="col-12 col-xl-6">';
-echo '              <div class="card-soft p-3">';
-echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Top adversários</b><span class="text-muted small">J + PPJ</span></div>';
-echo '                <div style="height:320px"><canvas id="ch_opponents"></canvas></div>';
-echo '              </div>';
-echo '            </div>';
-echo '            <div class="col-12 col-xl-6">';
-echo '              <div class="card-soft p-3">';
-echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Uniformes</b><span class="text-muted small">J + PPJ</span></div>';
-echo '                <div style="height:320px"><canvas id="ch_kits"></canvas></div>';
-echo '              </div>';
-echo '            </div>';
+echo '            <div class="col-12 col-xl-6"><div class="card-soft p-3"><div class="d-flex justify-content-between align-items-center mb-2"><b>Top adversários</b><span class="text-muted small">J + PPJ</span></div><div style="height:320px"><canvas id="ch_opponents"></canvas></div></div></div>';
+echo '            <div class="col-12 col-xl-6"><div class="card-soft p-3"><div class="d-flex justify-content-between align-items-center mb-2"><b>Uniformes</b><span class="text-muted small">J + PPJ</span></div><div style="height:320px"><canvas id="ch_kits"></canvas></div></div></div>';
 echo '          </div>';
-
 echo '          <div class="row g-3 mt-0">';
-echo '            <div class="col-12 col-xl-6">';
-echo '              <div class="card-soft p-3">';
-echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Fases</b><span class="text-muted small">PPJ</span></div>';
-echo '                <div style="height:280px"><canvas id="ch_phases"></canvas></div>';
-echo '              </div>';
-echo '            </div>';
-echo '            <div class="col-12 col-xl-6">';
-echo '              <div class="card-soft p-3">';
-echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Clima</b><span class="text-muted small">PPJ</span></div>';
-echo '                <div style="height:280px"><canvas id="ch_weather"></canvas></div>';
-echo '              </div>';
-echo '            </div>';
+echo '            <div class="col-12 col-xl-6"><div class="card-soft p-3"><div class="d-flex justify-content-between align-items-center mb-2"><b>Fases</b><span class="text-muted small">PPJ</span></div><div style="height:280px"><canvas id="ch_phases"></canvas></div></div></div>';
+echo '            <div class="col-12 col-xl-6"><div class="card-soft p-3"><div class="d-flex justify-content-between align-items-center mb-2"><b>Clima</b><span class="text-muted small">PPJ</span></div><div style="height:280px"><canvas id="ch_weather"></canvas></div></div></div>';
 echo '          </div>';
-
 echo '        </div>';
 echo '      </div>';
 echo '    </div>';
 
-// Elenco
 echo '    <div class="accordion-item">';
 echo '      <h2 class="accordion-header" id="accHead4">';
 echo '        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#accCol4" aria-expanded="false" aria-controls="accCol4">';
@@ -993,211 +993,104 @@ echo '        </button>';
 echo '      </h2>';
 echo '      <div id="accCol4" class="accordion-collapse collapse" aria-labelledby="accHead4" data-bs-parent="#accStatsCharts">';
 echo '        <div class="accordion-body">';
-
 echo '          <div class="row g-3">';
-echo '            <div class="col-12 col-xl-6">';
-echo '              <div class="card-soft p-3">';
-echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Top 10 - Mais jogos</b><span class="text-muted small">entered=1</span></div>';
-echo '                <div style="height:320px"><canvas id="ch_players_games"></canvas></div>';
-echo '              </div>';
-echo '            </div>';
-echo '            <div class="col-12 col-xl-6">';
-echo '              <div class="card-soft p-3">';
-echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Top 10 - Mais consecutivos</b><span class="text-muted small">streak</span></div>';
-echo '                <div style="height:320px"><canvas id="ch_players_consec"></canvas></div>';
-echo '              </div>';
-echo '            </div>';
+echo '            <div class="col-12 col-xl-6"><div class="card-soft p-3"><div class="d-flex justify-content-between align-items-center mb-2"><b>Top 10 - Mais jogos</b><span class="text-muted small">participação real</span></div><div style="height:320px"><canvas id="ch_players_games"></canvas></div></div></div>';
+echo '            <div class="col-12 col-xl-6"><div class="card-soft p-3"><div class="d-flex justify-content-between align-items-center mb-2"><b>Top 10 - Mais consecutivos</b><span class="text-muted small">streak</span></div><div style="height:320px"><canvas id="ch_players_consec"></canvas></div></div></div>';
 echo '          </div>';
-
 echo '          <div class="row g-3 mt-0">';
-echo '            <div class="col-12 col-xl-4">';
-echo '              <div class="card-soft p-3">';
-echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Top 10 - Clean sheets (GK)</b><span class="text-muted small">GA=0</span></div>';
-echo '                <div style="height:300px"><canvas id="ch_players_cleans"></canvas></div>';
-echo '              </div>';
-echo '            </div>';
-echo '            <div class="col-12 col-xl-4">';
-echo '              <div class="card-soft p-3">';
-echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Top 10 - Gols</b><span class="text-muted small">se disponível</span></div>';
-echo '                <div style="height:300px"><canvas id="ch_players_goals"></canvas></div>';
-echo '              </div>';
-echo '            </div>';
-echo '            <div class="col-12 col-xl-4">';
-echo '              <div class="card-soft p-3">';
-echo '                <div class="d-flex justify-content-between align-items-center mb-2"><b>Top 10 - Assistências</b><span class="text-muted small">se disponível</span></div>';
-echo '                <div style="height:300px"><canvas id="ch_players_assists"></canvas></div>';
-echo '              </div>';
-echo '            </div>';
+echo '            <div class="col-12 col-xl-4"><div class="card-soft p-3"><div class="d-flex justify-content-between align-items-center mb-2"><b>Top 10 - Clean sheets (GK)</b><span class="text-muted small">GA=0</span></div><div style="height:300px"><canvas id="ch_players_cleans"></canvas></div></div></div>';
+echo '            <div class="col-12 col-xl-4"><div class="card-soft p-3"><div class="d-flex justify-content-between align-items-center mb-2"><b>Top 10 - Gols</b><span class="text-muted small">se disponível</span></div><div style="height:300px"><canvas id="ch_players_goals"></canvas></div></div></div>';
+echo '            <div class="col-12 col-xl-4"><div class="card-soft p-3"><div class="d-flex justify-content-between align-items-center mb-2"><b>Top 10 - Assistências</b><span class="text-muted small">se disponível</span></div><div style="height:300px"><canvas id="ch_players_assists"></canvas></div></div></div>';
 echo '          </div>';
-
-echo '          <div class="text-muted small mt-2">';
-echo '            Observação: Gols/Assistências dependem da tabela <code>match_player_stats</code> com colunas <code>goals_for</code> (ou <code>goals</code>) e <code>assists</code>.';
-echo '          </div>';
-
+echo '          <div class="text-muted small mt-2">Observação: Gols/Assistências dependem da tabela <code>match_player_stats</code> com colunas <code>goals_for</code> (ou <code>goals</code>) e <code>assists</code>.</div>';
 echo '        </div>';
 echo '      </div>';
 echo '    </div>';
 
-echo '  </div>'; // accordion
-echo '</div>'; // card-soft
+echo '  </div>';
+echo '</div>';
 
-// -----------------------------------------------------------------------------
-// Mandante x Visitante (tabela)
-// -----------------------------------------------------------------------------
 echo '<div class="card-soft mb-3 p-3">';
 echo '  <div class="d-flex justify-content-between align-items-center mb-2">';
 echo '    <h5 class="mb-0">Mandante x Visitante</h5>';
 echo '  </div>';
 $rowsHA = [
-  [
-    'cond'=>'Mandante',
-    'played'=>$homeAway['home']['played'],'wins'=>$homeAway['home']['wins'],'draws'=>$homeAway['home']['draws'],'losses'=>$homeAway['home']['losses'],
-    'gf'=>$homeAway['home']['gf'],'ga'=>$homeAway['home']['ga'],'gd'=>$homeAway['home']['gd'],
-    'points'=>$homeAway['home']['points'],'pct'=>$homeAway['home']['pct'].'%'
-  ],
-  [
-    'cond'=>'Visitante',
-    'played'=>$homeAway['away']['played'],'wins'=>$homeAway['away']['wins'],'draws'=>$homeAway['away']['draws'],'losses'=>$homeAway['away']['losses'],
-    'gf'=>$homeAway['away']['gf'],'ga'=>$homeAway['away']['ga'],'gd'=>$homeAway['away']['gd'],
-    'points'=>$homeAway['away']['points'],'pct'=>$homeAway['away']['pct'].'%'
-  ],
+  ['cond'=>'Mandante','played'=>$homeAway['home']['played'],'wins'=>$homeAway['home']['wins'],'draws'=>$homeAway['home']['draws'],'losses'=>$homeAway['home']['losses'],'gf'=>$homeAway['home']['gf'],'ga'=>$homeAway['home']['ga'],'gd'=>$homeAway['home']['gd'],'points'=>$homeAway['home']['points'],'pct'=>$homeAway['home']['pct'].'%'],
+  ['cond'=>'Visitante','played'=>$homeAway['away']['played'],'wins'=>$homeAway['away']['wins'],'draws'=>$homeAway['away']['draws'],'losses'=>$homeAway['away']['losses'],'gf'=>$homeAway['away']['gf'],'ga'=>$homeAway['away']['ga'],'gd'=>$homeAway['away']['gd'],'points'=>$homeAway['away']['points'],'pct'=>$homeAway['away']['pct'].'%'],
 ];
 render_table(['Condição','J','V','E','D','GF','GA','SG','Pts','%'], $rowsHA, ['cond','played','wins','draws','losses','gf','ga','gd','points','pct'], 10);
 echo '</div>';
 
-// Seções principais (tabelas)
 echo '<div class="row g-3 mb-3">';
-
-echo '<div class="col-12 col-lg-6">';
-echo '  <div class="card-soft p-3">';
-echo '    <h5 class="mb-2">Top 10 goleadas</h5>';
+echo '<div class="col-12 col-lg-6"><div class="card-soft p-3"><h5 class="mb-2">Top 10 goleadas</h5>';
 render_table(['Data','Adversário','Placar','Saldo','Competição','Fase','Rodada'], $topBlowouts, ['date','opponent','score','diff','competition','phase','round'], 7);
-echo '  </div>';
-echo '</div>';
-
-echo '<div class="col-12 col-lg-6">';
-echo '  <div class="card-soft p-3">';
-echo '    <h5 class="mb-2">Placar mais comum (GF x GA)</h5>';
+echo '</div></div>';
+echo '<div class="col-12 col-lg-6"><div class="card-soft p-3"><h5 class="mb-2">Placar mais comum (GF x GA)</h5>';
 render_table(['Placar','Qtd'], $commonScorelines, ['scoreline','count'], 2);
-echo '  </div>';
+echo '</div></div>';
 echo '</div>';
 
-echo '</div>';
-
-// Artilheiros / Assistências (tabelas)
 echo '<div class="row g-3 mb-3">';
-
-echo '<div class="col-12 col-lg-6">';
-echo '  <div class="card-soft p-3">';
-echo '    <h5 class="mb-2">Top 10 artilheiros</h5>';
+echo '<div class="col-12 col-lg-6"><div class="card-soft p-3"><h5 class="mb-2">Top 10 artilheiros</h5>';
 if ($mpStatsAvailable) {
   render_table(['Jogador','Gols'], $topScorers, ['player_name','goals'], 2);
 } else {
   echo '<div class="text-muted">Sem dados: tabela <code>match_player_stats</code> não encontrada (ou sem colunas <code>goals_for</code>/<code>goals</code>).</div>';
 }
-echo '  </div>';
-echo '</div>';
-
-echo '<div class="col-12 col-lg-6">';
-echo '  <div class="card-soft p-3">';
-echo '    <h5 class="mb-2">Top 10 líderes em assistência</h5>';
+echo '</div></div>';
+echo '<div class="col-12 col-lg-6"><div class="card-soft p-3"><h5 class="mb-2">Top 10 líderes em assistência</h5>';
 if ($mpStatsAvailable) {
   render_table(['Jogador','Assistências'], $topAssists, ['player_name','assists'], 2);
 } else {
   echo '<div class="text-muted">Sem dados: tabela <code>match_player_stats</code> não encontrada (ou sem colunas <code>assists</code>).</div>';
 }
-echo '  </div>';
+echo '</div></div>';
 echo '</div>';
 
-echo '</div>';
-
-// Goleiros / Jogos
 echo '<div class="row g-3 mb-3">';
-
-echo '<div class="col-12 col-lg-4">';
-echo '  <div class="card-soft p-3">';
-echo '    <h5 class="mb-2">Top 10 goleiros com clean sheet</h5>';
+echo '<div class="col-12 col-lg-4"><div class="card-soft p-3"><h5 class="mb-2">Top 10 goleiros com clean sheet</h5>';
 render_table(['Goleiro','Clean sheets'], $topCleanSheets, ['player_name','clean_sheets'], 2);
-echo '  </div>';
-echo '</div>';
-
-echo '<div class="col-12 col-lg-8">';
-echo '  <div class="card-soft p-3">';
-echo '    <h5 class="mb-2">Top 100 jogadores com mais jogos</h5>';
+echo '</div></div>';
+echo '<div class="col-12 col-lg-8"><div class="card-soft p-3"><h5 class="mb-2">Top 100 jogadores com mais jogos</h5>';
 render_table_scroll(['Jogador','Jogos'], $topGames100, ['player_name','games'], 2, 340);
-echo '  </div>';
+echo '</div></div>';
 echo '</div>';
 
-echo '</div>';
-
-// Consecutivos
 echo '<div class="card-soft mb-3 p-3">';
-echo '  <h5 class="mb-2">Atletas com mais jogos consecutivos</h5>';
+echo '<h5 class="mb-2">Atletas com mais jogos consecutivos</h5>';
 render_table_scroll(['Jogador','Streak'], $topConsecutiveGames, ['player_name','streak'], 2, 340);
-echo '  <div class="text-muted mt-2">Streak baseado em <code>entered=1</code> em partidas consecutivas dentro do filtro aplicado.</div>';
+echo '<div class="text-muted mt-2">Streak baseado na participação real em partidas consecutivas dentro do filtro aplicado.</div>';
 echo '</div>';
 
-// Extras
 echo '<div class="row g-3 mb-3">';
-
-echo '<div class="col-12 col-lg-6">';
-echo '  <div class="card-soft p-3">';
-echo '    <h5 class="mb-2">Top 10 jogos com mais gols (GF+GA)</h5>';
+echo '<div class="col-12 col-lg-6"><div class="card-soft p-3"><h5 class="mb-2">Top 10 jogos com mais gols (GF+GA)</h5>';
 render_table(['Data','Adversário','Placar','Total','Competição'], $topMostGoals, ['date','opponent','score','total','competition'], 5);
-echo '  </div>';
-echo '</div>';
-
-echo '<div class="col-12 col-lg-6">';
-echo '  <div class="card-soft p-3">';
-echo '    <h5 class="mb-2">Top 10 vitórias com mais gols marcados (GF)</h5>';
+echo '</div></div>';
+echo '<div class="col-12 col-lg-6"><div class="card-soft p-3"><h5 class="mb-2">Top 10 vitórias com mais gols marcados (GF)</h5>';
 render_table(['Data','Adversário','Placar','GF','Saldo'], $topWinsByGF, ['date','opponent','score','gf','diff'], 5);
-echo '  </div>';
+echo '</div></div>';
 echo '</div>';
 
-echo '</div>';
-
-// Rankings gerais
 echo '<div class="row g-3 mb-3">';
-
-echo '<div class="col-12 col-lg-6">';
-echo '  <div class="card-soft p-3">';
-echo '    <h5 class="mb-2">Top 10 adversários mais enfrentados</h5>';
+echo '<div class="col-12 col-lg-6"><div class="card-soft p-3"><h5 class="mb-2">Top 10 adversários mais enfrentados</h5>';
 render_table(['Adversário','J','V','E','D'], $oppMostPlayed, ['label','played','wins','draws','losses'], 5);
-echo '  </div>';
-echo '</div>';
-
-echo '<div class="col-12 col-lg-6">';
-echo '  <div class="card-soft p-3">';
-echo '    <h5 class="mb-2">Top 10 estádios com mais jogos</h5>';
+echo '</div></div>';
+echo '<div class="col-12 col-lg-6"><div class="card-soft p-3"><h5 class="mb-2">Top 10 estádios com mais jogos</h5>';
 render_table(['Estádio','J','V','E','D'], $stadMostPlayed, ['label','played','wins','draws','losses'], 5);
-echo '  </div>';
-echo '</div>';
-
+echo '</div></div>';
 echo '</div>';
 
 echo '<div class="row g-3 mb-3">';
-
-echo '<div class="col-12 col-lg-6">';
-echo '  <div class="card-soft p-3">';
-echo '    <h5 class="mb-2">Uniformes (mais usados)</h5>';
+echo '<div class="col-12 col-lg-6"><div class="card-soft p-3"><h5 class="mb-2">Uniformes (mais usados)</h5>';
 render_table(['Uniforme','J','V','E','D','Pts'], $kitRank, ['label','played','wins','draws','losses','points'], 6);
-echo '  </div>';
-echo '</div>';
-
-echo '<div class="col-12 col-lg-6">';
-echo '  <div class="card-soft p-3">';
-echo '    <h5 class="mb-2">Árbitros (mais jogos)</h5>';
+echo '</div></div>';
+echo '<div class="col-12 col-lg-6"><div class="card-soft p-3"><h5 class="mb-2">Árbitros (mais jogos)</h5>';
 render_table(['Árbitro','J','V','E','D'], $refRank, ['label','played','wins','draws','losses'], 5);
-echo '  </div>';
-echo '</div>';
-
+echo '</div></div>';
 echo '</div>';
 
 echo '<div class="row g-3 mb-4">';
-
-echo '<div class="col-12 col-lg-6">';
-echo '  <div class="card-soft p-3">';
-echo '    <h5 class="mb-2">Fases (phase)</h5>';
+echo '<div class="col-12 col-lg-6"><div class="card-soft p-3"><h5 class="mb-2">Fases (phase)</h5>';
 $phaseRows = [];
 foreach ($phaseRank as $r) {
   $phaseRows[] = [
@@ -1207,21 +1100,12 @@ foreach ($phaseRank as $r) {
   ];
 }
 render_table(['Fase','J','V','E','D','GF','GA','Pts'], $phaseRows, ['label','played','wins','draws','losses','gf','ga','points'], 8);
-echo '  </div>';
-echo '</div>';
-
-echo '<div class="col-12 col-lg-6">';
-echo '  <div class="card-soft p-3">';
-echo '    <h5 class="mb-2">Clima (weather)</h5>';
+echo '</div></div>';
+echo '<div class="col-12 col-lg-6"><div class="card-soft p-3"><h5 class="mb-2">Clima (weather)</h5>';
 render_table(['Clima','J','V','E','D','Pts'], $weatherRank, ['label','played','wins','draws','losses','points'], 6);
-echo '  </div>';
+echo '</div></div>';
 echo '</div>';
 
-echo '</div>';
-
-// -----------------------------------------------------------------------------
-// JS dos gráficos (ANTES do footer)
-// -----------------------------------------------------------------------------
 $chartJson = json_encode($chart, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
 echo '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>';
@@ -1232,8 +1116,6 @@ document.addEventListener('DOMContentLoaded', () => {
   if (!window.Chart || !window.PM_STATS) return;
 
   const S = window.PM_STATS;
-
-  // tenta respeitar tema (dark/light) via variável do bootstrap, sem hardcode de cor
   const bodyStyle = getComputedStyle(document.body);
   const bodyColor = (bodyStyle.getPropertyValue('--bs-body-color') || bodyStyle.color || '').trim();
   if (bodyColor) Chart.defaults.color = bodyColor;
@@ -1293,7 +1175,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Visão Geral
   mkLine('ch_points', S.timeline.labels, [
     { label: 'Pontos acumulados', data: S.timeline.points_cum, tension: 0.25 },
   ], { scales: { y: { beginAtZero: true } } });
@@ -1304,13 +1185,11 @@ document.addEventListener('DOMContentLoaded', () => {
     { label: 'Saldo acumulado', data: S.timeline.gd_cum, tension: 0.25 },
   ]);
 
-  // Ataque & Defesa
   mkBar('ch_gfga', S.timeline.labels, [
-    { label: 'GF', data: S.timeline.gf },
-    { label: 'GA', data: S.timeline.ga },
+    { label: 'Gols Pró', data: S.timeline.gf },
+    { label: 'Gols Contra', data: S.timeline.ga },
   ], { scales: { y: { beginAtZero: true } } });
 
-  // Bubble: placares
   (function(){
     const c = el('ch_scorebubble'); if (!c) return;
     const points = (S.score_bubble.points || []).map(p => ({ x: p.x, y: p.y, r: p.r, _v: p.v, _label: p.label }));
@@ -1336,14 +1215,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   })();
 
-  // Home/Away (PPJ + GF/GA)
   mkBar('ch_homeaway', S.homeaway.labels, [
     { label: 'PPJ', data: S.homeaway.ppj },
     { label: 'GF', data: S.homeaway.gf },
     { label: 'GA', data: S.homeaway.ga },
   ], { scales: { y: { beginAtZero: true } } });
 
-  // Contexto
   mkHBar('ch_opponents', S.opponents.labels, [
     { label: 'Jogos', data: S.opponents.played },
     { label: 'PPJ', data: S.opponents.ppj },
@@ -1362,7 +1239,6 @@ document.addEventListener('DOMContentLoaded', () => {
     { label: 'PPJ', data: S.weathers.ppj },
   ], { scales: { x: { beginAtZero: true, suggestedMax: 3 } } });
 
-  // Elenco
   mkHBar('ch_players_games', S.players.games_top10.labels, [
     { label: 'Jogos', data: S.players.games_top10.values },
   ]);
@@ -1383,7 +1259,6 @@ document.addEventListener('DOMContentLoaded', () => {
       { label: 'Assistências', data: S.players.assists_top10.values },
     ]);
   } else {
-    // sem stats -> mostra vazio sem quebrar
     mkHBar('ch_players_goals', ['Sem dados'], [{ label: 'Gols', data: [0] }]);
     mkHBar('ch_players_assists', ['Sem dados'], [{ label: 'Assistências', data: [0] }]);
   }
@@ -1392,7 +1267,3 @@ document.addEventListener('DOMContentLoaded', () => {
 echo '</script>';
 
 render_footer();
-
-
-
-

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 $pdo = db();
+$userId = require_user_id();
 
 /**
  * Opções fixas de posição (conforme requisito)
@@ -9,7 +10,8 @@ $pdo = db();
 $POSITIONS = ['GOL','ZAG','LD','LE','ALD','ALE','VOL','MC','ME','MD','MEI','PD','PE','SA','ATA'];
 
 /**
- * Ordem customizada para ordenar por POS (GOL, ALE, LE, ZAG, LD, ALD, VOL, ME, MC, MD, MEI, PE, PD, SA, ATA)
+ * Ordem customizada para ordenar por POS
+ * (GOL, ALE, LE, ZAG, LD, ALD, VOL, ME, MC, MD, MEI, PE, PD, SA, ATA)
  */
 $PRIMARY_POS_ORDER_CASE = "CASE UPPER(primary_position)
   WHEN 'GOL' THEN 1
@@ -32,24 +34,44 @@ $PRIMARY_POS_ORDER_CASE = "CASE UPPER(primary_position)
 /**
  * Helpers
  */
-function parse_positions(string $raw): array {
+function parse_positions(string $raw): array
+{
   $raw = trim($raw);
   if ($raw === '') return [];
+
   $raw = str_replace(';', ',', $raw);
   $parts = array_map('trim', explode(',', $raw));
   $parts = array_values(array_unique(array_filter($parts, fn($v) => $v !== '')));
+
   return $parts;
 }
 
 /**
  * Determina temporada padrão para registros gerados via players.php (aposentadoria).
- * Preferência: última season registrada em matches; fallback: ano atual.
+ * Preferência: última season registrada em matches do usuário; fallback: ano atual.
  */
-function current_season(PDO $pdo): string {
+function current_season(PDO $pdo, int $userId): string
+{
   try {
-    $r = q($pdo, "SELECT season FROM matches WHERE season IS NOT NULL AND TRIM(season)<>'' ORDER BY match_date DESC, id DESC LIMIT 1")->fetch();
-    if ($r && isset($r['season']) && trim((string)$r['season']) !== '') return (string)$r['season'];
-  } catch (Throwable $e) { /* ignore */ }
+    $r = q(
+      $pdo,
+      "SELECT season
+       FROM matches
+       WHERE user_id = :user_id
+         AND season IS NOT NULL
+         AND TRIM(season) <> ''
+       ORDER BY match_date DESC, id DESC
+       LIMIT 1",
+      [':user_id' => $userId]
+    )->fetch();
+
+    if ($r && isset($r['season']) && trim((string)$r['season']) !== '') {
+      return (string)$r['season'];
+    }
+  } catch (Throwable $e) {
+    // ignore
+  }
+
   return date('Y');
 }
 
@@ -57,51 +79,141 @@ $err = '';
 $edit = null;
 
 /**
- * ✅ Aposentar (GET)
+ * Aposentar (GET)
  * - Registra em transfers como APOSENTADORIA
  * - Seta is_active=0
  * - Mantém histórico (não apaga jogador)
  */
 if (isset($_GET['retire'])) {
   $pid = (int)$_GET['retire'];
-  $p = q($pdo, "SELECT id, name FROM players WHERE id=? AND club_name = ? COLLATE NOCASE LIMIT 1", [$pid, app_club()] )->fetch();
+
+  $p = q(
+    $pdo,
+    "SELECT id, name
+     FROM players
+     WHERE id = :id
+       AND user_id = :user_id
+       AND club_name = :club_name COLLATE NOCASE
+     LIMIT 1",
+    [
+      ':id'        => $pid,
+      ':user_id'   => $userId,
+      ':club_name' => app_club(),
+    ]
+  )->fetch();
+
   if ($p) {
-    $season = current_season($pdo);
+    $season = current_season($pdo, $userId);
     $today = date('Y-m-d');
 
-    // grava em transfers (mantendo o padrão de colunas do projeto)
-    // Obs: value/term/grade/extra/shirt podem ser NULL
-    q($pdo, "INSERT INTO transfers(
-        season, type, player_id, athlete_name, club_origin, club_destination,
-        value, term, grade, extra_player_name, shirt_number_assigned, transaction_date, notes
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    q(
+      $pdo,
+      "INSERT INTO transfers(
+        user_id,
+        season,
+        type,
+        player_id,
+        athlete_name,
+        club_origin,
+        club_destination,
+        value,
+        term,
+        grade,
+        extra_player_name,
+        shirt_number_assigned,
+        transaction_date,
+        notes
+      ) VALUES (
+        :user_id,
+        :season,
+        :type,
+        :player_id,
+        :athlete_name,
+        :club_origin,
+        :club_destination,
+        :value,
+        :term,
+        :grade,
+        :extra_player_name,
+        :shirt_number_assigned,
+        :transaction_date,
+        :notes
+      )",
       [
-        $season, 'APOSENTADORIA', (int)$p['id'], (string)$p['name'],
-        app_club(), 'APOSENTADORIA',
-        null, null, null, null, null, $today, 'Aposentado via players.php'
+        ':user_id'               => $userId,
+        ':season'                => $season,
+        ':type'                  => 'APOSENTADORIA',
+        ':player_id'             => (int)$p['id'],
+        ':athlete_name'          => (string)$p['name'],
+        ':club_origin'           => app_club(),
+        ':club_destination'      => 'APOSENTADORIA',
+        ':value'                 => null,
+        ':term'                  => null,
+        ':grade'                 => null,
+        ':extra_player_name'     => null,
+        ':shirt_number_assigned' => null,
+        ':transaction_date'      => $today,
+        ':notes'                 => 'Aposentado via players.php',
       ]
     );
 
-    // inativa o jogador no elenco
-    q($pdo, "UPDATE players SET is_active=0, updated_at=datetime('now') WHERE id=? AND club_name = ? COLLATE NOCASE", [(int)$p['id'], app_club()]);
+    q(
+      $pdo,
+      "UPDATE players
+       SET is_active = 0,
+           updated_at = datetime('now')
+       WHERE id = :id
+         AND user_id = :user_id
+         AND club_name = :club_name COLLATE NOCASE",
+      [
+        ':id'        => (int)$p['id'],
+        ':user_id'   => $userId,
+        ':club_name' => app_club(),
+      ]
+    );
   }
+
   redirect('/?page=players');
 }
 
 /** Edit (GET) */
 if (isset($_GET['edit'])) {
-  $edit = q($pdo, "SELECT * FROM players WHERE id=? AND club_name = ? COLLATE NOCASE", [(int)$_GET['edit'], app_club()])->fetch() ?: null;
+  $edit = q(
+    $pdo,
+    "SELECT *
+     FROM players
+     WHERE id = :id
+       AND user_id = :user_id
+       AND club_name = :club_name COLLATE NOCASE",
+    [
+      ':id'        => (int)$_GET['edit'],
+      ':user_id'   => $userId,
+      ':club_name' => app_club(),
+    ]
+  )->fetch() ?: null;
 }
 
 /** Delete (GET) */
 if (isset($_GET['del'])) {
   $idDel = (int)$_GET['del'];
+
   try {
-    q($pdo, "DELETE FROM players WHERE id=? AND club_name = ? COLLATE NOCASE", [$idDel, app_club()]);
+    q(
+      $pdo,
+      "DELETE FROM players
+       WHERE id = :id
+         AND user_id = :user_id
+         AND club_name = :club_name COLLATE NOCASE",
+      [
+        ':id'        => $idDel,
+        ':user_id'   => $userId,
+        ':club_name' => app_club(),
+      ]
+    );
   } catch (Throwable $e) {
-    // Evita “tela branca” quando FK RESTRICT impedir delete
     $err = 'Não foi possível excluir este atleta (há histórico vinculado).';
   }
+
   if ($err === '') {
     redirect('/?page=players');
   }
@@ -113,21 +225,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $name = trim((string)($_POST['name'] ?? ''));
   $shirt = ($_POST['shirt_number'] ?? '') === '' ? null : (int)$_POST['shirt_number'];
 
-  // Primária (select)
   $prim = trim((string)($_POST['primary_position'] ?? ''));
 
-  // Secundárias (checkboxes => array)
   $secArr = $_POST['secondary_positions'] ?? [];
   if (!is_array($secArr)) $secArr = [];
-  $secArr = array_values(array_unique(array_filter(array_map(fn($v) => trim((string)$v), $secArr), fn($v) => $v !== '')));
 
-  // filtra apenas posições válidas (evita valores injetados)
+  $secArr = array_values(array_unique(array_filter(
+    array_map(fn($v) => trim((string)$v), $secArr),
+    fn($v) => $v !== ''
+  )));
+
   $secArr = array_values(array_filter($secArr, fn($v) => in_array($v, $POSITIONS, true)));
   $sec = implode(',', $secArr);
 
   $active = isset($_POST['is_active']) ? 1 : 0;
 
-  // validações
   if ($name === '') {
     $err = 'Informe o nome do atleta.';
   } elseif (!in_array($prim, $POSITIONS, true)) {
@@ -135,33 +247,77 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   }
 
   if ($err !== '') {
-    // preserva input no form
     $edit = [
       'id' => $id,
       'name' => $name,
       'shirt_number' => $shirt,
       'primary_position' => $prim,
       'secondary_positions' => $sec,
-      'is_active' => $active
+      'is_active' => $active,
     ];
   } else {
     if ($id > 0) {
-      q($pdo, "UPDATE players SET name=?, shirt_number=?, primary_position=?, secondary_positions=?, is_active=?, updated_at=datetime('now')
-              WHERE id=? AND club_name = ? COLLATE NOCASE",
-        [$name, $shirt, $prim, $sec, $active, $id, app_club()]
+      q(
+        $pdo,
+        "UPDATE players
+         SET name = :name,
+             shirt_number = :shirt_number,
+             primary_position = :primary_position,
+             secondary_positions = :secondary_positions,
+             is_active = :is_active,
+             updated_at = datetime('now')
+         WHERE id = :id
+           AND user_id = :user_id
+           AND club_name = :club_name COLLATE NOCASE",
+        [
+          ':name'                => $name,
+          ':shirt_number'        => $shirt,
+          ':primary_position'    => $prim,
+          ':secondary_positions' => $sec,
+          ':is_active'           => $active,
+          ':id'                  => $id,
+          ':user_id'             => $userId,
+          ':club_name'           => app_club(),
+        ]
       );
     } else {
-      q($pdo, "INSERT INTO players(name, shirt_number, primary_position, secondary_positions, is_active, club_name)
-              VALUES (?,?,?,?,?,?)",
-        [$name, $shirt, $prim, $sec, $active, app_club()]
+      q(
+        $pdo,
+        "INSERT INTO players(
+          user_id,
+          name,
+          shirt_number,
+          primary_position,
+          secondary_positions,
+          is_active,
+          club_name
+        ) VALUES (
+          :user_id,
+          :name,
+          :shirt_number,
+          :primary_position,
+          :secondary_positions,
+          :is_active,
+          :club_name
+        )",
+        [
+          ':user_id'             => $userId,
+          ':name'                => $name,
+          ':shirt_number'        => $shirt,
+          ':primary_position'    => $prim,
+          ':secondary_positions' => $sec,
+          ':is_active'           => $active,
+          ':club_name'           => app_club(),
+        ]
       );
     }
+
     redirect('/?page=players');
   }
 }
 
 /**
- * SORT POR COLUNA (seleção em cada coluna)
+ * SORT POR COLUNA
  */
 $allowedDirs = ['ASC', 'DESC'];
 $allowedSortKeys = ['number', 'name', 'primary', 'secondary', 'status'];
@@ -177,57 +333,62 @@ if (in_array($getSortKey, $allowedSortKeys, true) && in_array($getSortDir, $allo
   $sortDir = $getSortDir;
 }
 
-// ORDER BY padrão atual (quando não há sort selecionado)
-$defaultOrderBy = "is_active DESC, {$PRIMARY_POS_ORDER_CASE} ASC, shirt_number ASC, name ASC";
+$defaultOrderBy = "p.is_active DESC, {$PRIMARY_POS_ORDER_CASE} ASC, p.shirt_number ASC, p.name ASC";
 
-// Monta ORDER BY com base no sort selecionado
 $orderBy = $defaultOrderBy;
 if ($sortKey !== null && $sortDir !== null) {
   if ($sortKey === 'number') {
-    $orderBy = "shirt_number IS NULL ASC, shirt_number {$sortDir}, name ASC";
+    $orderBy = "p.shirt_number IS NULL ASC, p.shirt_number {$sortDir}, p.name ASC";
   } elseif ($sortKey === 'name') {
-    $orderBy = "name {$sortDir}";
+    $orderBy = "p.name {$sortDir}";
   } elseif ($sortKey === 'primary') {
-    $orderBy = "{$PRIMARY_POS_ORDER_CASE} {$sortDir}, name ASC";
+    $orderBy = "{$PRIMARY_POS_ORDER_CASE} {$sortDir}, p.name ASC";
   } elseif ($sortKey === 'secondary') {
-    $orderBy = "secondary_positions {$sortDir}, name ASC";
+    $orderBy = "p.secondary_positions {$sortDir}, p.name ASC";
   } elseif ($sortKey === 'status') {
-    $orderBy = "is_active {$sortDir}, name ASC";
+    $orderBy = "p.is_active {$sortDir}, p.name ASC";
   }
 }
 
 /**
- * ✅ Busca jogadores + último tipo de transferência (para separar Vendidos/Emprestados/Aposentados)
+ * Busca jogadores + último tipo de transferência, filtrando por user_id
  */
-$rows = q($pdo, "
+$rows = q(
+  $pdo,
+  "
   SELECT
     p.*,
     (
       SELECT t.type
       FROM transfers t
-      WHERE t.player_id = p.id
+      WHERE t.user_id = :user_id_sub_1
+        AND t.player_id = p.id
       ORDER BY t.transaction_date DESC, t.id DESC
       LIMIT 1
     ) AS last_transfer_type,
     (
       SELECT t.transaction_date
       FROM transfers t
-      WHERE t.player_id = p.id
+      WHERE t.user_id = :user_id_sub_2
+        AND t.player_id = p.id
       ORDER BY t.transaction_date DESC, t.id DESC
       LIMIT 1
     ) AS last_transfer_date
   FROM players p
-  WHERE p.club_name = ? COLLATE NOCASE
+  WHERE p.user_id = :user_id
+    AND p.club_name = :club_name COLLATE NOCASE
   ORDER BY {$orderBy}
-", [app_club()])->fetchAll();
+  ",
+  [
+    ':user_id'       => $userId,
+    ':user_id_sub_1' => $userId,
+    ':user_id_sub_2' => $userId,
+    ':club_name'     => app_club(),
+  ]
+)->fetchAll();
 
 /**
- * ✅ Apartar por grupos:
- * - Ativos
- * - Emprestados (última saída por empréstimo)
- * - Vendidos (última venda)
- * - Aposentados
- * - Outros inativos
+ * Apartar por grupos
  */
 $ativos = [];
 $emprestados = [];
@@ -283,7 +444,6 @@ echo '<label class="form-label">Número</label>';
 echo '<input type="number" class="form-control" name="shirt_number" value="' . h((string)($edit['shirt_number'] ?? '')) . '">';
 echo '</div>';
 
-// Posição primária
 $primVal = (string)($edit['primary_position'] ?? '');
 echo '<div class="mb-3">';
 echo '<label class="form-label">Posição primária</label>';
@@ -296,7 +456,6 @@ foreach ($POSITIONS as $p) {
 echo '</select>';
 echo '</div>';
 
-// Posições secundárias
 $secSelected = parse_positions((string)($edit['secondary_positions'] ?? ''));
 echo '<div class="mb-3">';
 echo '<label class="form-label">Posições secundárias</label>';
@@ -322,14 +481,16 @@ echo '<label class="form-check-label" for="is_active">Ativo no elenco</label>';
 echo '</div>';
 
 echo '<button class="btn btn-primary">Salvar</button>';
-if ($edit) echo ' <a class="btn btn-secondary" href="/?page=players">Cancelar</a>';
+if ($edit) {
+  echo ' <a class="btn btn-secondary" href="/?page=players">Cancelar</a>';
+}
 echo '</form>';
 
 echo '<div class="text-muted small mt-3">Dica: transferências podem ativar/inativar atletas automaticamente.</div>';
 
-echo '</div>'; // card-body
-echo '</div>'; // card
-echo '</div>'; // col
+echo '</div>';
+echo '</div>';
+echo '</div>';
 
 /** LISTA (lado direito) */
 echo '<div class="col-lg-9">';
@@ -341,13 +502,13 @@ echo '</div>';
 
 echo '<div class="table-responsive">';
 
-// Form GET para sort por coluna
 echo '<form method="get" id="sortFormPlayers">';
 echo '<input type="hidden" name="page" value="players">';
 echo '<input type="hidden" name="sort_key" id="sort_key" value="' . h((string)($sortKey ?? '')) . '">';
 echo '<input type="hidden" name="sort_dir" id="sort_dir" value="' . h((string)($sortDir ?? '')) . '">';
 
-function sortSelect(?string $activeKey, ?string $activeDir, string $thisKey): string {
+function sortSelect(?string $activeKey, ?string $activeDir, string $thisKey): string
+{
   $isActive = ($activeKey === $thisKey) ? ($activeDir ?? '') : '';
   $selNone = ($isActive === '') ? ' selected' : '';
   $selAsc  = ($isActive === 'ASC') ? ' selected' : '';
@@ -360,17 +521,21 @@ function sortSelect(?string $activeKey, ?string $activeDir, string $thisKey): st
          '</select>';
 }
 
-function badge_for_row(array $r): string {
+function badge_for_row(array $r): string
+{
   $isActive = (int)($r['is_active'] ?? 0) === 1;
   $lt = strtoupper(trim((string)($r['last_transfer_type'] ?? '')));
+
   if ($isActive) return 'Ativo';
   if ($lt === 'SAIU POR EMPRÉSTIMO') return 'Emprestado';
   if ($lt === 'VENDIDO') return 'Vendido';
   if ($lt === 'APOSENTADORIA') return 'Aposentado';
+
   return 'Inativo';
 }
 
-function render_section(string $title, array $list, ?string $emptyText = null): void {
+function render_section(string $title, array $list, ?string $emptyText = null): void
+{
   global $sortKey, $sortDir;
 
   echo '<div class="p-3 border-top">';
@@ -404,11 +569,9 @@ function render_section(string $title, array $list, ?string $emptyText = null): 
       echo '<td class="text-nowrap">' . h((string)$r['secondary_positions']) . '</td>';
       echo '<td class="text-nowrap"><span class="badge bg-success-subtle text-success">' . badge_for_row($r) . '</span></td>';
 
-      // Ações
       echo '<td class="text-end text-nowrap">';
       echo '<a class="btn btn-sm btn-primary" href="/?page=players&edit=' . (int)$r['id'] . '">Editar</a> ';
 
-      // Aposentar: só se não estiver aposentado já
       $lt = strtoupper(trim((string)($r['last_transfer_type'] ?? '')));
       if ($lt !== 'APOSENTADORIA') {
         echo '<a class="btn btn-warning btn-sm" href="/?page=players&retire=' . (int)$r['id'] . '" onclick="return confirm(\'Confirmar aposentadoria?\')">Aposentar</a> ';
@@ -426,17 +589,15 @@ function render_section(string $title, array $list, ?string $emptyText = null): 
   echo '</div>';
 }
 
-// Seções
 render_section('Elenco Ativo', $ativos, 'Nenhum atleta ativo.');
 render_section('Emprestados', $emprestados, 'Nenhum atleta emprestado.');
 render_section('Vendidos', $vendidos, 'Nenhum atleta vendido.');
 render_section('Aposentados', $aposentados, 'Nenhum atleta aposentado.');
 render_section('Outros Inativos', $inativosOutros, 'Nenhum outro inativo.');
 
-echo '</form>'; // sortFormPlayers
-echo '</div>'; // table-responsive
+echo '</form>';
+echo '</div>';
 
-// JS: ao selecionar uma coluna, limpa as outras e submete
 echo '<script>
 (function () {
   var form = document.getElementById("sortFormPlayers");
@@ -473,13 +634,9 @@ echo '<script>
 })();
 </script>';
 
-echo '</div>'; // card/list
-echo '</div>'; // col/list
+echo '</div>';
+echo '</div>';
 
-echo '</div>'; // row
+echo '</div>';
 
 render_footer();
-
-
-
-

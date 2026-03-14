@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 $pdo = db();
+$userId = require_user_id();
 
 /**
  * Opções fixas de posição
@@ -9,27 +10,49 @@ $pdo = db();
 $POSITIONS = ['GOL','ZAG','LD','LE','ALD','ALE','VOL','MC','ME','MD','MEI','PD','PE','SA','ATA'];
 
 /**
- * Ordem customizada para ordenar por POS (GOL, ALE, LE, ZAG, LD, ALD, VOL, ME, MC, MD, MEI, PE, PD, SA, ATA)
+ * Ordem customizada para ordenar por POS
+ * (GOL, ALE, LE, ZAG, LD, ALD, VOL, ME, MC, MD, MEI, PE, PD, SA, ATA)
  */
-$PRIMARY_POS_ORDER_CASE = "CASE UPPER(primary_position) WHEN 'GOL' THEN 1 WHEN 'ALE' THEN 2 WHEN 'LE' THEN 3 WHEN 'ZAG' THEN 4 WHEN 'LD' THEN 5 WHEN 'ALD' THEN 6 WHEN 'VOL' THEN 7 WHEN 'ME' THEN 8 WHEN 'MC' THEN 9 WHEN 'MD' THEN 10 WHEN 'MEI' THEN 11 WHEN 'PE' THEN 12 WHEN 'PD' THEN 13 WHEN 'SA' THEN 14 WHEN 'ATA' THEN 15 ELSE 999 END";
+$PRIMARY_POS_ORDER_CASE = "CASE UPPER(primary_position)
+  WHEN 'GOL' THEN 1
+  WHEN 'ALE' THEN 2
+  WHEN 'LE' THEN 3
+  WHEN 'ZAG' THEN 4
+  WHEN 'LD' THEN 5
+  WHEN 'ALD' THEN 6
+  WHEN 'VOL' THEN 7
+  WHEN 'ME' THEN 8
+  WHEN 'MC' THEN 9
+  WHEN 'MD' THEN 10
+  WHEN 'MEI' THEN 11
+  WHEN 'PE' THEN 12
+  WHEN 'PD' THEN 13
+  WHEN 'SA' THEN 14
+  WHEN 'ATA' THEN 15
+  ELSE 999 END";
 
-function parse_positions(string $raw): array {
+function parse_positions(string $raw): array
+{
   $raw = trim($raw);
   if ($raw === '') return [];
+
   $raw = str_replace(';', ',', $raw);
   $parts = array_map('trim', explode(',', $raw));
   $parts = array_values(array_unique(array_filter($parts, fn($v) => $v !== '')));
+
   return $parts;
 }
 
 /**
- * Tabelas (se não existirem)
- * NOTE: mantive shirt_number no CREATE por compatibilidade com quem já criou antes,
- * mas a página não usa mais número na BASE.
+ * Tabelas (para compatibilidade de ambientes novos)
+ * Observação:
+ * - mantive o formato próximo ao original
+ * - agora com user_id
  */
 q($pdo, "
   CREATE TABLE IF NOT EXISTS academy_players (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
     name TEXT NOT NULL,
     primary_position TEXT NOT NULL,
     secondary_positions TEXT NULL,
@@ -43,6 +66,7 @@ q($pdo, "
 q($pdo, "
   CREATE TABLE IF NOT EXISTS academy_dismissed (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
     name TEXT NOT NULL,
     club_name TEXT NOT NULL,
     dismissed_at TEXT DEFAULT (datetime('now'))
@@ -56,34 +80,94 @@ $edit = null;
  * Edit (GET)
  */
 if (isset($_GET['edit'])) {
-  $edit = q($pdo, "SELECT * FROM academy_players WHERE id=? AND club_name = ? COLLATE NOCASE", [(int)$_GET['edit'], app_club()])->fetch() ?: null;
+  $edit = q(
+    $pdo,
+    "SELECT *
+     FROM academy_players
+     WHERE id = :id
+       AND user_id = :user_id
+       AND club_name = :club_name COLLATE NOCASE",
+    [
+      ':id'        => (int)$_GET['edit'],
+      ':user_id'   => $userId,
+      ':club_name' => app_club(),
+    ]
+  )->fetch() ?: null;
 }
 
 /**
  * Delete (GET) - remove da base definitivamente
  */
 if (isset($_GET['del'])) {
-  q($pdo, "DELETE FROM academy_players WHERE id=? AND club_name = ? COLLATE NOCASE", [(int)$_GET['del'], app_club()]);
+  q(
+    $pdo,
+    "DELETE FROM academy_players
+     WHERE id = :id
+       AND user_id = :user_id
+       AND club_name = :club_name COLLATE NOCASE",
+    [
+      ':id'        => (int)$_GET['del'],
+      ':user_id'   => $userId,
+      ':club_name' => app_club(),
+    ]
+  );
+
   redirect('/?page=crias');
 }
 
 /**
- * Dispensar (GET) - move para lista de dispensados (só nome)
+ * Dispensar (GET) - move para lista de dispensados
  */
 if (isset($_GET['dismiss'])) {
   $id = (int)$_GET['dismiss'];
-  $r = q($pdo, "SELECT * FROM academy_players WHERE id=? AND club_name = ? COLLATE NOCASE", [$id, app_club()])->fetch();
+
+  $r = q(
+    $pdo,
+    "SELECT *
+     FROM academy_players
+     WHERE id = :id
+       AND user_id = :user_id
+       AND club_name = :club_name COLLATE NOCASE",
+    [
+      ':id'        => $id,
+      ':user_id'   => $userId,
+      ':club_name' => app_club(),
+    ]
+  )->fetch();
+
   if ($r) {
-    q($pdo, "INSERT INTO academy_dismissed(name, club_name) VALUES(?,?)", [(string)$r['name'], app_club()]);
-    q($pdo, "DELETE FROM academy_players WHERE id=? AND club_name = ? COLLATE NOCASE", [$id, app_club()]);
+    q(
+      $pdo,
+      "INSERT INTO academy_dismissed(user_id, name, club_name)
+       VALUES(:user_id, :name, :club_name)",
+      [
+        ':user_id'   => $userId,
+        ':name'      => (string)$r['name'],
+        ':club_name' => app_club(),
+      ]
+    );
+
+    q(
+      $pdo,
+      "DELETE FROM academy_players
+       WHERE id = :id
+         AND user_id = :user_id
+         AND club_name = :club_name COLLATE NOCASE",
+      [
+        ':id'        => $id,
+        ':user_id'   => $userId,
+        ':club_name' => app_club(),
+      ]
+    );
   }
+
   redirect('/?page=crias');
 }
 
 /**
  * PROMOVER (POST - via modal)
  * - Nome vem preenchido
- * - Usuário preenche: número (agora SIM), posição primária, secundárias
+ * - Usuário preenche: número, posição primária, secundárias
  */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['promote_submit'])) {
   $academyId = (int)($_POST['academy_id'] ?? 0);
@@ -94,7 +178,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['promote_submit'])) {
 
   $secArr = $_POST['promote_secondary_positions'] ?? [];
   if (!is_array($secArr)) $secArr = [];
-  $secArr = array_values(array_unique(array_filter(array_map(fn($v) => trim((string)$v), $secArr), fn($v) => $v !== '')));
+
+  $secArr = array_values(array_unique(array_filter(
+    array_map(fn($v) => trim((string)$v), $secArr),
+    fn($v) => $v !== ''
+  )));
   $secArr = array_values(array_filter($secArr, fn($v) => in_array($v, $POSITIONS, true)));
   $sec = implode(',', $secArr);
 
@@ -109,34 +197,156 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['promote_submit'])) {
   }
 
   if ($err === '') {
-    $r = q($pdo, "SELECT * FROM academy_players WHERE id=? AND club_name = ? COLLATE NOCASE", [$academyId, app_club()])->fetch();
+    $r = q(
+      $pdo,
+      "SELECT *
+       FROM academy_players
+       WHERE id = :id
+         AND user_id = :user_id
+         AND club_name = :club_name COLLATE NOCASE",
+      [
+        ':id'        => $academyId,
+        ':user_id'   => $userId,
+        ':club_name' => app_club(),
+      ]
+    )->fetch();
+
     if (!$r) {
       $err = 'Atleta não encontrado na base.';
     } else {
-      // 1) Insere no elenco profissional (players)
-      q($pdo, "INSERT INTO players(name, shirt_number, primary_position, secondary_positions, is_active, club_name)
-               VALUES (?,?,?,?,?,?)",
-        [$name, $shirt, $prim, $sec, 1, app_club()]
-      );
-
-      // 2) Remove da base
-      q($pdo, "DELETE FROM academy_players WHERE id=? AND club_name = ? COLLATE NOCASE", [$academyId, app_club()]);
-
-      // 3) Tenta registrar em Transferências como "PROMOVIDO DA BASE" (não quebra se schema diferente)
       try {
-        q($pdo, "INSERT INTO transfers(player_name, transfer_type, club_name, created_at)
-                 VALUES (?,?,?,datetime('now'))",
-          [$name, 'PROMOVIDO DA BASE', app_club()]
-        );
-      } catch (\Throwable $e) {}
+        $pdo->beginTransaction();
 
-      redirect('/?page=crias');
+        // 1) Insere no elenco profissional
+        q(
+          $pdo,
+          "INSERT INTO players(
+            user_id,
+            name,
+            shirt_number,
+            primary_position,
+            secondary_positions,
+            is_active,
+            club_name
+          ) VALUES (
+            :user_id,
+            :name,
+            :shirt_number,
+            :primary_position,
+            :secondary_positions,
+            :is_active,
+            :club_name
+          )",
+          [
+            ':user_id'             => $userId,
+            ':name'                => $name,
+            ':shirt_number'        => $shirt,
+            ':primary_position'    => $prim,
+            ':secondary_positions' => $sec,
+            ':is_active'           => 1,
+            ':club_name'           => app_club(),
+          ]
+        );
+
+        // 2) Remove da base
+        q(
+          $pdo,
+          "DELETE FROM academy_players
+           WHERE id = :id
+             AND user_id = :user_id
+             AND club_name = :club_name COLLATE NOCASE",
+          [
+            ':id'        => $academyId,
+            ':user_id'   => $userId,
+            ':club_name' => app_club(),
+          ]
+        );
+
+        // 3) Tenta registrar em Transferências como "PROMOVIDO DA BASE"
+        // Não quebra se o schema estiver diferente
+        try {
+          q(
+            $pdo,
+            "INSERT INTO transfers(
+              user_id,
+              season,
+              type,
+              player_id,
+              athlete_name,
+              club_origin,
+              club_destination,
+              value,
+              term,
+              grade,
+              extra_player_name,
+              shirt_number_assigned,
+              transaction_date,
+              notes
+            ) VALUES (
+              :user_id,
+              :season,
+              :type,
+              :player_id,
+              :athlete_name,
+              :club_origin,
+              :club_destination,
+              :value,
+              :term,
+              :grade,
+              :extra_player_name,
+              :shirt_number_assigned,
+              :transaction_date,
+              :notes
+            )",
+            [
+              ':user_id'               => $userId,
+              ':season'                => date('Y'),
+              ':type'                  => 'PROMOVIDO DA BASE',
+              ':player_id'             => null,
+              ':athlete_name'          => $name,
+              ':club_origin'           => 'BASE',
+              ':club_destination'      => app_club(),
+              ':value'                 => null,
+              ':term'                  => null,
+              ':grade'                 => null,
+              ':extra_player_name'     => null,
+              ':shirt_number_assigned' => $shirt,
+              ':transaction_date'      => date('Y-m-d'),
+              ':notes'                 => 'Promovido via crias.php',
+            ]
+          );
+        } catch (Throwable $e) {
+          // compatibilidade com schemas antigos
+          try {
+            q(
+              $pdo,
+              "INSERT INTO transfers(player_name, transfer_type, club_name, created_at)
+               VALUES (:player_name, :transfer_type, :club_name, datetime('now'))",
+              [
+                ':player_name'   => $name,
+                ':transfer_type' => 'PROMOVIDO DA BASE',
+                ':club_name'     => app_club(),
+              ]
+            );
+          } catch (Throwable $e2) {
+            // ignora
+          }
+        }
+
+        $pdo->commit();
+        redirect('/?page=crias');
+      } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+          $pdo->rollBack();
+        }
+        $err = 'Não foi possível promover o atleta.';
+      }
     }
   }
 }
 
 /**
- * Save (POST) - Cadastro/edição na BASE (SEM número)
+ * Save (POST) - Cadastro/edição na BASE
  */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['promote_submit'])) {
   $id = (int)($_POST['id'] ?? 0);
@@ -145,7 +355,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['promote_submit'])) {
 
   $secArr = $_POST['secondary_positions'] ?? [];
   if (!is_array($secArr)) $secArr = [];
-  $secArr = array_values(array_unique(array_filter(array_map(fn($v) => trim((string)$v), $secArr), fn($v) => $v !== '')));
+
+  $secArr = array_values(array_unique(array_filter(
+    array_map(fn($v) => trim((string)$v), $secArr),
+    fn($v) => $v !== ''
+  )));
   $secArr = array_values(array_filter($secArr, fn($v) => in_array($v, $POSITIONS, true)));
   $sec = implode(',', $secArr);
 
@@ -163,27 +377,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['promote_submit'])) {
       'name' => $name,
       'primary_position' => $prim,
       'secondary_positions' => $sec,
-      'is_active' => $active
+      'is_active' => $active,
     ];
   } else {
     if ($id > 0) {
-      q($pdo, "UPDATE academy_players
-              SET name=?, primary_position=?, secondary_positions=?, is_active=?, updated_at=datetime('now')
-              WHERE id=? AND club_name = ? COLLATE NOCASE",
-        [$name, $prim, $sec, $active, $id, app_club()]
+      q(
+        $pdo,
+        "UPDATE academy_players
+         SET name = :name,
+             primary_position = :primary_position,
+             secondary_positions = :secondary_positions,
+             is_active = :is_active,
+             updated_at = datetime('now')
+         WHERE id = :id
+           AND user_id = :user_id
+           AND club_name = :club_name COLLATE NOCASE",
+        [
+          ':name'                => $name,
+          ':primary_position'    => $prim,
+          ':secondary_positions' => $sec,
+          ':is_active'           => $active,
+          ':id'                  => $id,
+          ':user_id'             => $userId,
+          ':club_name'           => app_club(),
+        ]
       );
     } else {
-      q($pdo, "INSERT INTO academy_players(name, primary_position, secondary_positions, is_active, club_name)
-              VALUES (?,?,?,?,?)",
-        [$name, $prim, $sec, $active, app_club()]
+      q(
+        $pdo,
+        "INSERT INTO academy_players(
+          user_id,
+          name,
+          primary_position,
+          secondary_positions,
+          is_active,
+          club_name
+        ) VALUES (
+          :user_id,
+          :name,
+          :primary_position,
+          :secondary_positions,
+          :is_active,
+          :club_name
+        )",
+        [
+          ':user_id'             => $userId,
+          ':name'                => $name,
+          ':primary_position'    => $prim,
+          ':secondary_positions' => $sec,
+          ':is_active'           => $active,
+          ':club_name'           => app_club(),
+        ]
       );
     }
+
     redirect('/?page=crias');
   }
 }
 
 /**
- * SORT POR COLUNA (sem coluna de número agora)
+ * SORT POR COLUNA
  */
 $allowedDirs = ['ASC', 'DESC'];
 $sortKey = null;
@@ -207,9 +460,7 @@ foreach ($sortSelectMap as $param => $key) {
   }
 }
 
-#$defaultOrderBy = "is_active DESC, primary_position ASC, name ASC";
 $defaultOrderBy = "is_active DESC, {$PRIMARY_POS_ORDER_CASE} ASC, name ASC";
-
 $orderBy = $defaultOrderBy;
 
 if ($sortKey !== null && $sortDir !== null) {
@@ -224,25 +475,40 @@ if ($sortKey !== null && $sortDir !== null) {
   }
 }
 
-$rows = q($pdo, "
+$rows = q(
+  $pdo,
+  "
   SELECT *
   FROM academy_players
-  WHERE club_name = ? COLLATE NOCASE
+  WHERE user_id = :user_id
+    AND club_name = :club_name COLLATE NOCASE
   ORDER BY {$orderBy}
-", [app_club()])->fetchAll();
+  ",
+  [
+    ':user_id'   => $userId,
+    ':club_name' => app_club(),
+  ]
+)->fetchAll();
 
-$dismissed = q($pdo, "
+$dismissed = q(
+  $pdo,
+  "
   SELECT name
   FROM academy_dismissed
-  WHERE club_name = ? COLLATE NOCASE
+  WHERE user_id = :user_id
+    AND club_name = :club_name COLLATE NOCASE
   ORDER BY dismissed_at DESC, name ASC
-", [app_club()])->fetchAll();
+  ",
+  [
+    ':user_id'   => $userId,
+    ':club_name' => app_club(),
+  ]
+)->fetchAll();
 
 render_header('CRIAS DA ACADEMIA');
 
 /**
- * ✅ ÚNICA ALTERAÇÃO: tema/fundo do POP-UP de promoção (evita transparência/translúcido)
- * - não altera funções, layout, estrutura ou dados
+ * Tema/fundo do pop-up de promoção
  */
 echo '<style>
   #promoteModal .modal-content{
@@ -320,7 +586,6 @@ echo '</form>';
 
 echo '<div class="text-muted small mt-3">Dica: ao promover, o atleta sai da base e entra no elenco profissional.</div>';
 
-// Dispensados
 echo '<hr class="my-3">';
 echo '<div class="fw-bold mb-2">Dispensados da Base</div>';
 
@@ -337,7 +602,7 @@ if (!$dismissed) {
 echo '</div></div>';
 
 /**
- * COLUNA DIREITA: Lista (sem coluna # agora) + botões
+ * COLUNA DIREITA: Lista + botões
  */
 echo '<div class="col-lg-8 col-xl-9"><div class="card card-soft p-3">';
 echo '<div class="d-flex justify-content-between align-items-center mb-2"><div class="fw-bold">Lista</div>';
@@ -350,11 +615,13 @@ echo '<input type="hidden" name="page" value="crias">';
 echo '<table class="table table-sm align-middle mb-0">';
 echo '<thead><tr>';
 
-function sortSelect(string $name, ?string $activeKey, ?string $activeDir, string $thisKey): string {
+function sortSelect(string $name, ?string $activeKey, ?string $activeDir, string $thisKey): string
+{
   $isActive = ($activeKey === $thisKey) ? ($activeDir ?? '') : '';
   $selNone = ($isActive === '') ? ' selected' : '';
   $selAsc  = ($isActive === 'ASC') ? ' selected' : '';
   $selDesc = ($isActive === 'DESC') ? ' selected' : '';
+
   return '<select class="form-select form-select-sm js-sortcol" name="' . h($name) . '" data-key="' . h($thisKey) . '">' .
            '<option value=""' . $selNone . '>—</option>' .
            '<option value="ASC"' . $selAsc . '>↑</option>' .
@@ -390,7 +657,7 @@ foreach ($rows as $r) {
           Promover
         </button> ';
 
-  echo '<a class="btn btn-sm btn-dispense" href="/?page=crias&dismiss=' . $rid . '" onclick="return confirm(\'Dispensar este atleta da base? Ele irá para a lista de dispensados.\')">Dispensar</a>';
+  echo '<a class="btn btn-warning btn-sm" href="/?page=crias&dismiss=' . $rid . '" onclick="return confirm(\'Dispensar este atleta da base? Ele irá para a lista de dispensados.\')">Dispensar</a>';
 
   echo '</td>';
   echo '</tr>';
@@ -401,7 +668,7 @@ echo '</form>';
 echo '</div>';
 
 /**
- * MODAL PROMOVER (continua com Número, pois agora vira profissional)
+ * MODAL PROMOVER
  */
 echo '
 <div class="modal fade" id="promoteModal" tabindex="-1" aria-hidden="true">
@@ -518,13 +785,7 @@ echo '<script>
 })();
 </script>';
 
-echo '</div></div>'; // col direita
-echo '</div>'; // row
+echo '</div></div>';
+echo '</div>';
 
 render_footer();
-
-
-
-
-
-

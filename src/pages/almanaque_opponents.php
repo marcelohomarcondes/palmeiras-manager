@@ -1,8 +1,12 @@
 <?php
 declare(strict_types=1);
+
 require_once __DIR__ . '/../db.php';
 
-$pdo = db();
+$pdo    = db();
+$userId = require_user_id();
+$club   = function_exists('app_club') ? (string)app_club() : 'PALMEIRAS';
+
 render_header('Almanaque • Adversários');
 
 $q           = trim((string)($_GET['q'] ?? ''));
@@ -11,6 +15,27 @@ $competition = trim((string)($_GET['competition'] ?? ''));
 $opponent    = trim((string)($_GET['opponent'] ?? ''));
 $sort        = trim((string)($_GET['sort'] ?? 'games'));
 $dir         = strtolower(trim((string)($_GET['dir'] ?? 'desc'))) === 'asc' ? 'asc' : 'desc';
+
+if (!function_exists('table_columns')) {
+  function table_columns(PDO $pdo, string $table): array {
+    $cols = [];
+    $st = $pdo->query("PRAGMA table_info($table)");
+    foreach (($st ? $st->fetchAll(PDO::FETCH_ASSOC) : []) as $r) {
+      $cols[] = (string)($r['name'] ?? '');
+    }
+    return $cols;
+  }
+}
+
+if (!function_exists('table_has_user_id')) {
+  function table_has_user_id(PDO $pdo, string $table): bool {
+    static $cache = [];
+    if (!array_key_exists($table, $cache)) {
+      $cache[$table] = in_array('user_id', table_columns($pdo, $table), true);
+    }
+    return $cache[$table];
+  }
+}
 
 function alm_build_url(array $overrides = []): string {
   $params = array_merge($_GET, ['page' => 'almanaque_opponents'], $overrides);
@@ -48,6 +73,47 @@ function alm_fmt_date_br(?string $date): string {
   return $ts ? date('d/m/Y', $ts) : h($date);
 }
 
+$matchesHasUserId = table_has_user_id($pdo, 'matches');
+
+$clubNorm = "UPPER(TRIM(:club))";
+$homeNorm = "UPPER(TRIM(COALESCE(m.home, '')))";
+$awayNorm = "UPPER(TRIM(COALESCE(m.away, '')))";
+$isClubInMatch = "($homeNorm = $clubNorm OR $awayNorm = $clubNorm)";
+$opponentExpr = "CASE WHEN $homeNorm = $clubNorm THEN m.away ELSE m.home END";
+$gfExpr = "CASE WHEN $homeNorm = $clubNorm THEN COALESCE(m.home_score,0) ELSE COALESCE(m.away_score,0) END";
+$gaExpr = "CASE WHEN $homeNorm = $clubNorm THEN COALESCE(m.away_score,0) ELSE COALESCE(m.home_score,0) END";
+$resultExpr = "CASE
+  WHEN ($gfExpr) > ($gaExpr) THEN 'W'
+  WHEN ($gfExpr) = ($gaExpr) THEN 'D'
+  ELSE 'L'
+END";
+
+$baseWhere = [$isClubInMatch];
+$baseParams = [':club' => $club];
+
+if ($matchesHasUserId) {
+  $baseWhere[] = "m.user_id = :user_id";
+  $baseParams[':user_id'] = $userId;
+}
+
+$seasonOptionsSql = "
+  SELECT DISTINCT TRIM(COALESCE(m.season,'')) AS season
+  FROM matches m
+  WHERE " . implode(' AND ', $baseWhere) . "
+    AND TRIM(COALESCE(m.season,'')) <> ''
+  ORDER BY CAST(TRIM(m.season) AS INTEGER) DESC, TRIM(m.season) DESC
+";
+$seasonOptions = q($pdo, $seasonOptionsSql, $baseParams)->fetchAll(PDO::FETCH_COLUMN);
+
+$competitionOptionsSql = "
+  SELECT DISTINCT TRIM(COALESCE(m.competition,'')) AS competition
+  FROM matches m
+  WHERE " . implode(' AND ', $baseWhere) . "
+    AND TRIM(COALESCE(m.competition,'')) <> ''
+  ORDER BY TRIM(m.competition) ASC
+";
+$competitionOptions = q($pdo, $competitionOptionsSql, $baseParams)->fetchAll(PDO::FETCH_COLUMN);
+
 $sortMap = [
   'opponent'      => 'opponent',
   'name'          => 'opponent',
@@ -72,58 +138,47 @@ $sortMap = [
 $orderCol = $sortMap[$sort] ?? 'games';
 $orderDir = strtoupper($dir) === 'ASC' ? 'ASC' : 'DESC';
 
-$seasonOptions = q(
-  $pdo,
-  "SELECT DISTINCT season
-   FROM v_pm_matches
-   WHERE COALESCE(TRIM(season), '') <> ''
-   ORDER BY season DESC"
-)->fetchAll(PDO::FETCH_COLUMN);
-
-$competitionOptions = q(
-  $pdo,
-  "SELECT DISTINCT competition
-   FROM v_pm_matches
-   WHERE COALESCE(TRIM(competition), '') <> ''
-   ORDER BY competition ASC"
-)->fetchAll(PDO::FETCH_COLUMN);
-
 /*
 |--------------------------------------------------------------------------
 | DETALHE DO ADVERSÁRIO
 |--------------------------------------------------------------------------
 */
 if ($opponent !== '') {
-  $where = ["opponent = ?"];
-  $params = [$opponent];
+  $where = $baseWhere;
+  $params = $baseParams;
+
+  $where[] = "UPPER(TRIM(COALESCE(($opponentExpr), ''))) = UPPER(TRIM(:opponent))";
+  $params[':opponent'] = $opponent;
 
   if ($season !== '') {
-    $where[] = "season = ?";
-    $params[] = $season;
+    $where[] = "UPPER(TRIM(COALESCE(m.season, ''))) = UPPER(TRIM(:season))";
+    $params[':season'] = $season;
   }
 
   if ($competition !== '') {
-    $where[] = "competition = ?";
-    $params[] = $competition;
+    $where[] = "UPPER(TRIM(COALESCE(m.competition, ''))) = UPPER(TRIM(:competition))";
+    $params[':competition'] = $competition;
   }
 
   $sqlSummary = "
     SELECT
-      opponent,
+      ($opponentExpr) AS opponent,
       COUNT(*) AS games,
-      SUM(CASE WHEN result = 'W' THEN 1 ELSE 0 END) AS wins,
-      SUM(CASE WHEN result = 'D' THEN 1 ELSE 0 END) AS draws,
-      SUM(CASE WHEN result = 'L' THEN 1 ELSE 0 END) AS losses,
-      SUM(gf) AS goals_for,
-      SUM(ga) AS goals_against,
-      SUM(gf) - SUM(ga) AS goal_diff,
+      SUM(CASE WHEN ($resultExpr) = 'W' THEN 1 ELSE 0 END) AS wins,
+      SUM(CASE WHEN ($resultExpr) = 'D' THEN 1 ELSE 0 END) AS draws,
+      SUM(CASE WHEN ($resultExpr) = 'L' THEN 1 ELSE 0 END) AS losses,
+      SUM($gfExpr) AS goals_for,
+      SUM($gaExpr) AS goals_against,
+      SUM($gfExpr) - SUM($gaExpr) AS goal_diff,
       ROUND(
-        (SUM(CASE WHEN result = 'W' THEN 3 WHEN result = 'D' THEN 1 ELSE 0 END) * 100.0) / (COUNT(*) * 3),
+        (
+          SUM(CASE WHEN ($resultExpr) = 'W' THEN 3 WHEN ($resultExpr) = 'D' THEN 1 ELSE 0 END) * 100.0
+        ) / (COUNT(*) * 3),
         2
       ) AS pct
-    FROM v_pm_matches
+    FROM matches m
     WHERE " . implode(' AND ', $where) . "
-    GROUP BY opponent
+    GROUP BY ($opponentExpr)
   ";
 
   $summary = q($pdo, $sqlSummary, $params)->fetch();
@@ -214,18 +269,18 @@ if ($opponent !== '') {
 
   $sqlMatches = "
     SELECT
-      id,
-      season,
-      competition,
-      match_date,
-      home,
-      away,
-      gf,
-      ga,
-      result
-    FROM v_pm_matches
+      m.id,
+      m.season,
+      m.competition,
+      m.match_date,
+      m.home,
+      m.away,
+      ($gfExpr) AS gf,
+      ($gaExpr) AS ga,
+      ($resultExpr) AS result
+    FROM matches m
     WHERE " . implode(' AND ', $where) . "
-    ORDER BY date(match_date) DESC, id DESC
+    ORDER BY date(m.match_date) DESC, m.id DESC
   ";
 
   $matches = q($pdo, $sqlMatches, $params)->fetchAll();
@@ -282,22 +337,22 @@ if ($opponent !== '') {
 | CONSOLIDADO
 |--------------------------------------------------------------------------
 */
-$where = [];
-$params = [];
+$where = $baseWhere;
+$params = $baseParams;
 
 if ($q !== '') {
-  $where[] = "opponent LIKE ?";
-  $params[] = "%$q%";
+  $where[] = "UPPER(TRIM(COALESCE(($opponentExpr), ''))) LIKE UPPER(TRIM(:q))";
+  $params[':q'] = '%' . $q . '%';
 }
 
 if ($season !== '') {
-  $where[] = "season = ?";
-  $params[] = $season;
+  $where[] = "UPPER(TRIM(COALESCE(m.season, ''))) = UPPER(TRIM(:season))";
+  $params[':season'] = $season;
 }
 
 if ($competition !== '') {
-  $where[] = "competition = ?";
-  $params[] = $competition;
+  $where[] = "UPPER(TRIM(COALESCE(m.competition, ''))) = UPPER(TRIM(:competition))";
+  $params[':competition'] = $competition;
 }
 
 echo '<div class="card-soft mb-3">';
@@ -344,64 +399,29 @@ echo '      </div>';
 echo '    </div>';
 echo '  </form>';
 
-if ($q === '' && $season === '' && $competition === '') {
-  $viewSortMap = [
-    'opponent'      => 'opponent',
-    'name'          => 'opponent',
-    'games'         => 'games',
-    'wins'          => 'wins',
-    'draws'         => 'draws',
-    'losses'        => 'losses',
-    'goals_for'     => 'goals_for',
-    'goals_against' => 'goals_against',
-    'goal_diff'     => 'goal_diff',
-    'pct'           => 'pct',
-    'j'             => 'games',
-    'v'             => 'wins',
-    'e'             => 'draws',
-    'd'             => 'losses',
-    'gp'            => 'goals_for',
-    'gc'            => 'goals_against',
-    'sg'            => 'goal_diff',
-    'ap'            => 'pct',
-  ];
+$sql = "
+  SELECT
+    ($opponentExpr) AS opponent,
+    COUNT(*) AS games,
+    SUM(CASE WHEN ($resultExpr) = 'W' THEN 1 ELSE 0 END) AS wins,
+    SUM(CASE WHEN ($resultExpr) = 'D' THEN 1 ELSE 0 END) AS draws,
+    SUM(CASE WHEN ($resultExpr) = 'L' THEN 1 ELSE 0 END) AS losses,
+    SUM($gfExpr) AS goals_for,
+    SUM($gaExpr) AS goals_against,
+    SUM($gfExpr) - SUM($gaExpr) AS goal_diff,
+    ROUND(
+      (
+        SUM(CASE WHEN ($resultExpr) = 'W' THEN 3 WHEN ($resultExpr) = 'D' THEN 1 ELSE 0 END) * 100.0
+      ) / (COUNT(*) * 3),
+      2
+    ) AS pct
+  FROM matches m
+  WHERE " . implode(' AND ', $where) . "
+  GROUP BY ($opponentExpr)
+  ORDER BY {$orderCol} {$orderDir}, opponent ASC
+";
 
-  $viewOrderCol = $viewSortMap[$sort] ?? 'games';
-  $viewOrderDir = strtoupper($dir) === 'ASC' ? 'ASC' : 'DESC';
-
-  $rows = q(
-    $pdo,
-    "SELECT opponent, games, wins, draws, losses, goals_for, goals_against, goal_diff, pct
-     FROM v_pm_vs_opponents
-     ORDER BY {$viewOrderCol} {$viewOrderDir}, opponent ASC"
-  )->fetchAll();
-} else {
-  $sql = "
-    SELECT
-      opponent,
-      COUNT(*) AS games,
-      SUM(CASE WHEN result = 'W' THEN 1 ELSE 0 END) AS wins,
-      SUM(CASE WHEN result = 'D' THEN 1 ELSE 0 END) AS draws,
-      SUM(CASE WHEN result = 'L' THEN 1 ELSE 0 END) AS losses,
-      SUM(gf) AS goals_for,
-      SUM(ga) AS goals_against,
-      SUM(gf) - SUM(ga) AS goal_diff,
-      ROUND(
-        (SUM(CASE WHEN result = 'W' THEN 3 WHEN result = 'D' THEN 1 ELSE 0 END) * 100.0) / (COUNT(*) * 3),
-        2
-      ) AS pct
-    FROM v_pm_matches
-  ";
-
-  if ($where) {
-    $sql .= " WHERE " . implode(' AND ', $where);
-  }
-
-  $sql .= " GROUP BY opponent
-            ORDER BY {$orderCol} {$orderDir}, opponent ASC";
-
-  $rows = q($pdo, $sql, $params)->fetchAll();
-}
+$rows = q($pdo, $sql, $params)->fetchAll();
 
 if (!$rows) {
   echo '  <div class="px-3 pb-3 muted">Sem resultados para os filtros informados.</div>';
@@ -445,7 +465,3 @@ echo '  </div>';
 echo '</div>';
 
 render_footer();
-
-
-
-

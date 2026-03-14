@@ -1,164 +1,88 @@
 <?php
-require_once __DIR__ . '/../layout.php';
+declare(strict_types=1);
+
+require_once __DIR__ . '/../db.php';
+
+$pdo = db();
+$userId = require_user_id();
+
 render_header('Almanaque');
+
+$items = [
+    [
+        'title' => 'Jogadores',
+        'icon'  => '/assets/player.svg',
+        'text'  => 'Histórico completo de todos os atletas que passaram pelo elenco profissional.',
+        'link'  => 'index.php?page=almanaque_players',
+    ],
+    [
+        'title' => 'Adversários',
+        'icon'  => '/assets/shield.svg',
+        'text'  => 'Estatísticas históricas contra todos os adversários enfrentados.',
+        'link'  => 'index.php?page=almanaque_opponents',
+    ],
+    [
+        'title' => 'Linha do Tempo',
+        'icon'  => '/assets/timeline.svg',
+        'text'  => 'Navegação histórica por décadas e anos com resumo completo das temporadas.',
+        'link'  => 'index.php?page=almanaque_timeline',
+    ],
+    [
+        'title' => 'Campeonatos',
+        'icon'  => '/assets/trophy.svg',
+        'text'  => 'Desempenho do clube em cada competição disputada ao longo da história.',
+        'link'  => 'index.php?page=almanaque_competitions',
+    ],
+    [
+        'title' => 'Estádios',
+        'icon'  => '/assets/stadium.svg',
+        'text'  => 'Histórico de jogos por estádio e desempenho do clube em cada um deles.',
+        'link'  => 'index.php?page=almanaque_stadiums',
+    ],
+    [
+        'title' => 'Árbitros',
+        'icon'  => '/assets/referee.svg',
+        'text'  => 'Histórico de partidas apitadas por cada árbitro.',
+        'link'  => 'index.php?page=almanaque_referees',
+    ],
+];
 ?>
 
-<style>
+<div class="container-fluid px-0">
+    <h2 class="pm-page-title">Almanaque</h2>
 
-/* tamanho dos ícones */
-.icon-svg{
-width:42px;
-height:42px;
-margin-bottom:12px;
-}
+    <div class="row g-3">
+        <?php foreach ($items as $item): ?>
+            <div class="col-12 col-md-6 col-xl-4">
+                <div class="card pm-feature-card h-100">
+                    <div class="card-body d-flex flex-column justify-content-center">
+                        <img
+                            src="<?= htmlspecialchars($item['icon'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>"
+                            class="icon-svg mx-auto"
+                            alt="<?= htmlspecialchars($item['title'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>"
+                        >
 
-/* tema claro */
-[data-theme="light"] .icon-svg{
-filter:brightness(0);
-}
+                        <h5 class="mt-3 mb-2">
+                            <?= htmlspecialchars($item['title'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
+                        </h5>
 
-/* tema escuro */
-[data-theme="dark"] .icon-svg{
-filter:brightness(0) invert(1);
-}
+                        <p>
+                            <?= htmlspecialchars($item['text'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
+                        </p>
 
-</style>
-
-<div class="container-fluid">
-
-<h2 class="mb-4">Almanaque</h2>
-
-<div class="row g-4">
-
-<!-- Jogadores -->
-<div class="col-lg-4">
-<div class="card shadow-sm h-100">
-<div class="card-body text-center">
-
-<img src="/assets/player.svg" class="icon-svg">
-
-<h5 class="mt-3">Jogadores</h5>
-
-<p>
-Histórico completo de todos os atletas que passaram pelo elenco profissional.
-</p>
-
-<a href="index.php?page=almanaque_players" class="btn btn-primary">
-Acessar
-</a>
-
-</div>
-</div>
-</div>
-
-<!-- Adversários -->
-<div class="col-lg-4">
-<div class="card shadow-sm h-100">
-<div class="card-body text-center">
-
-<img src="/assets/shield.svg" class="icon-svg">
-
-<h5 class="mt-3">Adversários</h5>
-
-<p>
-Estatísticas históricas contra todos os adversários enfrentados.
-</p>
-
-<a href="index.php?page=almanaque_opponents" class="btn btn-primary">
-Acessar
-</a>
-
-</div>
-</div>
-</div>
-
-<!-- Linha do Tempo -->
-<div class="col-lg-4">
-<div class="card shadow-sm h-100">
-<div class="card-body text-center">
-
-<img src="/assets/timeline.svg" class="icon-svg">
-
-<h5 class="mt-3">Linha do Tempo</h5>
-
-<p>
-Navegação histórica por décadas e anos com resumo completo das temporadas.
-</p>
-
-<a href="index.php?page=almanaque_timeline" class="btn btn-primary">
-Acessar
-</a>
-
-</div>
-</div>
-</div>
-
-<!-- Campeonatos -->
-<div class="col-lg-4">
-<div class="card shadow-sm h-100">
-<div class="card-body text-center">
-
-<img src="/assets/trophy.svg" class="icon-svg">
-
-<h5 class="mt-3">Campeonatos</h5>
-
-<p>
-Desempenho do clube em cada competição disputada ao longo da história.
-</p>
-
-<a href="index.php?page=almanaque_competitions" class="btn btn-primary">
-Acessar
-</a>
-
-</div>
-</div>
-</div>
-
-<!-- Estádios -->
-<div class="col-lg-4">
-<div class="card shadow-sm h-100">
-<div class="card-body text-center">
-
-<img src="/assets/stadium.svg" class="icon-svg">
-
-<h5 class="mt-3">Estádios</h5>
-
-<p>
-Histórico de jogos por estádio e desempenho do clube em cada um deles.
-</p>
-
-<a href="index.php?page=almanaque_stadiums" class="btn btn-primary">
-Acessar
-</a>
-
-</div>
-</div>
-</div>
-
-<!-- Árbitros -->
-<div class="col-lg-4">
-<div class="card shadow-sm h-100">
-<div class="card-body text-center">
-
-<img src="/assets/referee.svg" class="icon-svg">
-
-<h5 class="mt-3">Árbitros</h5>
-
-<p>
-Histórico de partidas apitadas por cada árbitro.
-</p>
-
-<a href="index.php?page=almanaque_referees" class="btn btn-primary">
-Acessar
-</a>
-
-</div>
-</div>
-</div>
-
-</div>
-
+                        <div class="mt-auto">
+                            <a
+                                href="<?= htmlspecialchars($item['link'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>"
+                                class="btn btn-primary"
+                            >
+                                Acessar
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        <?php endforeach; ?>
+    </div>
 </div>
 
 <?php render_footer(); ?>
-

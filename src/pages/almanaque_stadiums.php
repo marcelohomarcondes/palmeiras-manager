@@ -1,8 +1,12 @@
 <?php
 declare(strict_types=1);
+
 require_once __DIR__ . '/../db.php';
 
-$pdo = db();
+$pdo    = db();
+$userId = require_user_id();
+$club   = function_exists('app_club') ? (string)app_club() : 'PALMEIRAS';
+
 render_header('Almanaque • Estádios');
 
 $q           = trim((string)($_GET['q'] ?? ''));
@@ -12,9 +16,28 @@ $stadium     = trim((string)($_GET['stadium'] ?? ''));
 $sort        = trim((string)($_GET['sort'] ?? 'games'));
 $dir         = strtolower(trim((string)($_GET['dir'] ?? 'desc'))) === 'asc' ? 'asc' : 'desc';
 
-$clubName = 'Palmeiras';
+if (!function_exists('table_columns')) {
+  function table_columns(PDO $pdo, string $table): array {
+    $cols = [];
+    $st = $pdo->query("PRAGMA table_info($table)");
+    foreach (($st ? $st->fetchAll(PDO::FETCH_ASSOC) : []) as $r) {
+      $cols[] = (string)($r['name'] ?? '');
+    }
+    return $cols;
+  }
+}
 
-function alm_build_url(array $overrides = []): string {
+if (!function_exists('table_has_user_id')) {
+  function table_has_user_id(PDO $pdo, string $table): bool {
+    static $cache = [];
+    if (!array_key_exists($table, $cache)) {
+      $cache[$table] = in_array('user_id', table_columns($pdo, $table), true);
+    }
+    return $cache[$table];
+  }
+}
+
+function alm_stad_build_url(array $overrides = []): string {
   $params = array_merge($_GET, ['page' => 'almanaque_stadiums'], $overrides);
   foreach ($params as $k => $v) {
     if ($v === null || $v === '') {
@@ -24,7 +47,7 @@ function alm_build_url(array $overrides = []): string {
   return 'index.php?' . http_build_query($params);
 }
 
-function alm_sort_link(string $column, string $label, string $currentSort, string $currentDir): string {
+function alm_stad_sort_link(string $column, string $label, string $currentSort, string $currentDir): string {
   $nextDir = ($currentSort === $column && $currentDir === 'asc') ? 'desc' : 'asc';
   $arrow = '';
 
@@ -32,7 +55,7 @@ function alm_sort_link(string $column, string $label, string $currentSort, strin
     $arrow = $currentDir === 'asc' ? ' ▼' : ' ▲';
   }
 
-  $url = alm_build_url([
+  $url = alm_stad_build_url([
     'sort' => $column,
     'dir'  => $nextDir,
   ]);
@@ -40,15 +63,67 @@ function alm_sort_link(string $column, string $label, string $currentSort, strin
   return '<a href="' . h($url) . '">' . h($label) . $arrow . '</a>';
 }
 
-function alm_fmt_pct($v): string {
+function alm_stad_fmt_pct($v): string {
   return number_format((float)$v, 2, ',', '.') . '%';
 }
 
-function alm_fmt_date_br(?string $date): string {
+function alm_stad_fmt_date_br(?string $date): string {
   if (!$date) return '-';
   $ts = strtotime($date);
   return $ts ? date('d/m/Y', $ts) : h($date);
 }
+
+$matchesHasUserId = table_has_user_id($pdo, 'matches');
+
+$clubNorm = "UPPER(TRIM(:club))";
+$homeNorm = "UPPER(TRIM(COALESCE(m.home, '')))";
+$awayNorm = "UPPER(TRIM(COALESCE(m.away, '')))";
+$isClubInMatch = "($homeNorm = $clubNorm OR $awayNorm = $clubNorm)";
+
+$gfExpr = "CASE
+  WHEN $homeNorm = $clubNorm THEN COALESCE(m.home_score, 0)
+  ELSE COALESCE(m.away_score, 0)
+END";
+
+$gaExpr = "CASE
+  WHEN $homeNorm = $clubNorm THEN COALESCE(m.away_score, 0)
+  ELSE COALESCE(m.home_score, 0)
+END";
+
+$resultExpr = "CASE
+  WHEN ($gfExpr) > ($gaExpr) THEN 'W'
+  WHEN ($gfExpr) = ($gaExpr) THEN 'D'
+  ELSE 'L'
+END";
+
+$baseWhere = [
+  $isClubInMatch,
+  "TRIM(COALESCE(m.stadium, '')) <> ''",
+];
+$baseParams = [':club' => $club];
+
+if ($matchesHasUserId) {
+  $baseWhere[] = "m.user_id = :user_id";
+  $baseParams[':user_id'] = $userId;
+}
+
+$seasonOptionsSql = "
+  SELECT DISTINCT TRIM(COALESCE(m.season, '')) AS season
+  FROM matches m
+  WHERE " . implode(' AND ', $baseWhere) . "
+    AND TRIM(COALESCE(m.season, '')) <> ''
+  ORDER BY CAST(TRIM(m.season) AS INTEGER) DESC, TRIM(m.season) DESC
+";
+$seasonOptions = q($pdo, $seasonOptionsSql, $baseParams)->fetchAll(PDO::FETCH_COLUMN);
+
+$competitionOptionsSql = "
+  SELECT DISTINCT TRIM(COALESCE(m.competition, '')) AS competition
+  FROM matches m
+  WHERE " . implode(' AND ', $baseWhere) . "
+    AND TRIM(COALESCE(m.competition, '')) <> ''
+  ORDER BY TRIM(m.competition) ASC
+";
+$competitionOptions = q($pdo, $competitionOptionsSql, $baseParams)->fetchAll(PDO::FETCH_COLUMN);
 
 $sortMap = [
   'stadium'       => 'stadium',
@@ -74,125 +149,50 @@ $sortMap = [
 $orderCol = $sortMap[$sort] ?? 'games';
 $orderDir = strtoupper($dir) === 'ASC' ? 'ASC' : 'DESC';
 
-$seasonOptions = q(
-  $pdo,
-  "SELECT DISTINCT season
-   FROM matches
-   WHERE COALESCE(TRIM(season), '') <> ''
-     AND COALESCE(TRIM(stadium), '') <> ''
-   ORDER BY season DESC"
-)->fetchAll(PDO::FETCH_COLUMN);
-
-$competitionOptions = q(
-  $pdo,
-  "SELECT DISTINCT competition
-   FROM matches
-   WHERE COALESCE(TRIM(competition), '') <> ''
-     AND COALESCE(TRIM(stadium), '') <> ''
-   ORDER BY competition ASC"
-)->fetchAll(PDO::FETCH_COLUMN);
-
 /*
 |--------------------------------------------------------------------------
 | DETALHE DO ESTÁDIO
 |--------------------------------------------------------------------------
 */
 if ($stadium !== '') {
-  $where = ["TRIM(COALESCE(stadium, '')) = ?"];
-  $params = [$stadium];
+  $where = $baseWhere;
+  $params = $baseParams;
+
+  $where[] = "UPPER(TRIM(COALESCE(m.stadium, ''))) = UPPER(TRIM(:stadium))";
+  $params[':stadium'] = $stadium;
 
   if ($season !== '') {
-    $where[] = "season = ?";
-    $params[] = $season;
+    $where[] = "UPPER(TRIM(COALESCE(m.season, ''))) = UPPER(TRIM(:season))";
+    $params[':season'] = $season;
   }
 
   if ($competition !== '') {
-    $where[] = "competition = ?";
-    $params[] = $competition;
+    $where[] = "UPPER(TRIM(COALESCE(m.competition, ''))) = UPPER(TRIM(:competition))";
+    $params[':competition'] = $competition;
   }
 
   $sqlSummary = "
     SELECT
-      TRIM(COALESCE(stadium, '')) AS stadium,
+      TRIM(COALESCE(m.stadium, '')) AS stadium,
       COUNT(*) AS games,
-      SUM(
-        CASE
-          WHEN UPPER(TRIM(COALESCE(home, ''))) = UPPER(TRIM(?)) AND home_score > away_score THEN 1
-          WHEN UPPER(TRIM(COALESCE(away, ''))) = UPPER(TRIM(?)) AND away_score > home_score THEN 1
-          ELSE 0
-        END
-      ) AS wins,
-      SUM(
-        CASE
-          WHEN home_score = away_score THEN 1
-          ELSE 0
-        END
-      ) AS draws,
-      SUM(
-        CASE
-          WHEN UPPER(TRIM(COALESCE(home, ''))) = UPPER(TRIM(?)) AND home_score < away_score THEN 1
-          WHEN UPPER(TRIM(COALESCE(away, ''))) = UPPER(TRIM(?)) AND away_score < home_score THEN 1
-          ELSE 0
-        END
-      ) AS losses,
-      SUM(
-        CASE
-          WHEN UPPER(TRIM(COALESCE(home, ''))) = UPPER(TRIM(?)) THEN home_score
-          WHEN UPPER(TRIM(COALESCE(away, ''))) = UPPER(TRIM(?)) THEN away_score
-          ELSE 0
-        END
-      ) AS goals_for,
-      SUM(
-        CASE
-          WHEN UPPER(TRIM(COALESCE(home, ''))) = UPPER(TRIM(?)) THEN away_score
-          WHEN UPPER(TRIM(COALESCE(away, ''))) = UPPER(TRIM(?)) THEN home_score
-          ELSE 0
-        END
-      ) AS goals_against,
-      SUM(
-        CASE
-          WHEN UPPER(TRIM(COALESCE(home, ''))) = UPPER(TRIM(?)) THEN home_score
-          WHEN UPPER(TRIM(COALESCE(away, ''))) = UPPER(TRIM(?)) THEN away_score
-          ELSE 0
-        END
-      ) -
-      SUM(
-        CASE
-          WHEN UPPER(TRIM(COALESCE(home, ''))) = UPPER(TRIM(?)) THEN away_score
-          WHEN UPPER(TRIM(COALESCE(away, ''))) = UPPER(TRIM(?)) THEN home_score
-          ELSE 0
-        END
-      ) AS goal_diff,
+      SUM(CASE WHEN ($resultExpr) = 'W' THEN 1 ELSE 0 END) AS wins,
+      SUM(CASE WHEN ($resultExpr) = 'D' THEN 1 ELSE 0 END) AS draws,
+      SUM(CASE WHEN ($resultExpr) = 'L' THEN 1 ELSE 0 END) AS losses,
+      SUM($gfExpr) AS goals_for,
+      SUM($gaExpr) AS goals_against,
+      SUM($gfExpr) - SUM($gaExpr) AS goal_diff,
       ROUND(
         (
-          SUM(
-            CASE
-              WHEN UPPER(TRIM(COALESCE(home, ''))) = UPPER(TRIM(?)) AND home_score > away_score THEN 3
-              WHEN UPPER(TRIM(COALESCE(away, ''))) = UPPER(TRIM(?)) AND away_score > home_score THEN 3
-              WHEN home_score = away_score THEN 1
-              ELSE 0
-            END
-          ) * 100.0
+          SUM(CASE WHEN ($resultExpr) = 'W' THEN 3 WHEN ($resultExpr) = 'D' THEN 1 ELSE 0 END) * 100.0
         ) / (COUNT(*) * 3),
         2
       ) AS pct
-    FROM matches
+    FROM matches m
     WHERE " . implode(' AND ', $where) . "
-    GROUP BY TRIM(COALESCE(stadium, ''))
+    GROUP BY TRIM(COALESCE(m.stadium, ''))
   ";
 
-  $summaryParams = [
-    $clubName, $clubName,
-    $clubName, $clubName,
-    $clubName, $clubName,
-    $clubName, $clubName,
-    $clubName, $clubName,
-    $clubName, $clubName,
-    $clubName, $clubName,
-  ];
-  $summaryParams = array_merge($summaryParams, $params);
-
-  $summary = q($pdo, $sqlSummary, $summaryParams)->fetch();
+  $summary = q($pdo, $sqlSummary, $params)->fetch();
 
   echo '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">';
   echo '  <div>';
@@ -200,7 +200,7 @@ if ($stadium !== '') {
   echo '    <h3 class="mb-0">' . h($stadium) . '</h3>';
   echo '  </div>';
   echo '  <div>';
-  echo '    <a class="btn btn-secondary" href="' . h(alm_build_url([
+  echo '    <a class="btn btn-secondary" href="' . h(alm_stad_build_url([
             'stadium' => null,
             'sort'    => $sort,
             'dir'     => $dir,
@@ -237,7 +237,7 @@ if ($stadium !== '') {
   echo '        <button class="btn btn-primary" type="submit">Aplicar</button>';
   echo '      </div>';
   echo '      <div class="col-12 col-md-1 d-grid">';
-  echo '        <a class="btn btn-secondary" href="' . h(alm_build_url([
+  echo '        <a class="btn btn-secondary" href="' . h(alm_stad_build_url([
             'competition' => null,
             'season'      => null,
           ])) . '">Limpar</a>';
@@ -272,7 +272,7 @@ if ($stadium !== '') {
   echo '        <td class="text-center">' . (int)$summary['goals_for'] . '</td>';
   echo '        <td class="text-center">' . (int)$summary['goals_against'] . '</td>';
   echo '        <td class="text-center">' . (int)$summary['goal_diff'] . '</td>';
-  echo '        <td class="text-center">' . alm_fmt_pct($summary['pct']) . '</td>';
+  echo '        <td class="text-center">' . alm_stad_fmt_pct($summary['pct']) . '</td>';
   echo '      </tr></tbody>';
   echo '    </table>';
   echo '  </div>';
@@ -280,45 +280,23 @@ if ($stadium !== '') {
 
   $sqlMatches = "
     SELECT
-      id,
-      season,
-      competition,
-      phase,
-      round,
-      match_date,
-      home,
-      away,
-      home_score,
-      away_score,
-      CASE
-        WHEN UPPER(TRIM(COALESCE(home, ''))) = UPPER(TRIM(?)) THEN home_score
-        WHEN UPPER(TRIM(COALESCE(away, ''))) = UPPER(TRIM(?)) THEN away_score
-        ELSE 0
-      END AS gf,
-      CASE
-        WHEN UPPER(TRIM(COALESCE(home, ''))) = UPPER(TRIM(?)) THEN away_score
-        WHEN UPPER(TRIM(COALESCE(away, ''))) = UPPER(TRIM(?)) THEN home_score
-        ELSE 0
-      END AS ga,
-      CASE
-        WHEN UPPER(TRIM(COALESCE(home, ''))) = UPPER(TRIM(?)) AND home_score > away_score THEN 'W'
-        WHEN UPPER(TRIM(COALESCE(away, ''))) = UPPER(TRIM(?)) AND away_score > home_score THEN 'W'
-        WHEN home_score = away_score THEN 'D'
-        ELSE 'L'
-      END AS result
-    FROM matches
+      m.id,
+      m.season,
+      m.competition,
+      m.phase,
+      m.round,
+      m.match_date,
+      m.home,
+      m.away,
+      ($gfExpr) AS gf,
+      ($gaExpr) AS ga,
+      ($resultExpr) AS result
+    FROM matches m
     WHERE " . implode(' AND ', $where) . "
-    ORDER BY date(match_date) DESC, id DESC
+    ORDER BY date(m.match_date) DESC, m.id DESC
   ";
 
-  $matchParams = [
-    $clubName, $clubName,
-    $clubName, $clubName,
-    $clubName, $clubName,
-  ];
-  $matchParams = array_merge($matchParams, $params);
-
-  $matches = q($pdo, $sqlMatches, $matchParams)->fetchAll();
+  $matches = q($pdo, $sqlMatches, $params)->fetchAll();
 
   echo '<div class="card-soft">';
   echo '  <div class="p-3">';
@@ -349,7 +327,7 @@ if ($stadium !== '') {
     };
 
     echo '      <tr>';
-    echo '        <td>' . alm_fmt_date_br((string)$m['match_date']) . '</td>';
+    echo '        <td>' . alm_stad_fmt_date_br((string)$m['match_date']) . '</td>';
     echo '        <td>' . h((string)$m['season']) . '</td>';
     echo '        <td>' . h((string)$m['competition']) . '</td>';
     echo '        <td>' . h((string)($m['phase'] ?? '-')) . '</td>';
@@ -376,22 +354,22 @@ if ($stadium !== '') {
 | CONSOLIDADO
 |--------------------------------------------------------------------------
 */
-$where = ["COALESCE(TRIM(stadium), '') <> ''"];
-$params = [];
+$where = $baseWhere;
+$params = $baseParams;
 
 if ($q !== '') {
-  $where[] = "stadium LIKE ?";
-  $params[] = "%$q%";
+  $where[] = "UPPER(TRIM(COALESCE(m.stadium, ''))) LIKE UPPER(TRIM(:q))";
+  $params[':q'] = '%' . $q . '%';
 }
 
 if ($season !== '') {
-  $where[] = "season = ?";
-  $params[] = $season;
+  $where[] = "UPPER(TRIM(COALESCE(m.season, ''))) = UPPER(TRIM(:season))";
+  $params[':season'] = $season;
 }
 
 if ($competition !== '') {
-  $where[] = "competition = ?";
-  $params[] = $competition;
+  $where[] = "UPPER(TRIM(COALESCE(m.competition, ''))) = UPPER(TRIM(:competition))";
+  $params[':competition'] = $competition;
 }
 
 echo '<div class="card-soft mb-3">';
@@ -427,7 +405,7 @@ echo '      <div class="col-12 col-md-1 d-grid">';
 echo '        <button class="btn btn-primary" type="submit">Aplicar</button>';
 echo '      </div>';
 echo '      <div class="col-12 col-md-1 d-grid">';
-echo '        <a class="btn btn-secondary" href="' . h(alm_build_url([
+echo '        <a class="btn btn-secondary" href="' . h(alm_stad_build_url([
           'q'           => null,
           'competition' => null,
           'season'      => null,
@@ -440,93 +418,27 @@ echo '  </form>';
 
 $sql = "
   SELECT
-    TRIM(COALESCE(stadium, '')) AS stadium,
+    TRIM(COALESCE(m.stadium, '')) AS stadium,
     COUNT(*) AS games,
-    SUM(
-      CASE
-        WHEN UPPER(TRIM(COALESCE(home, ''))) = UPPER(TRIM(?)) AND home_score > away_score THEN 1
-        WHEN UPPER(TRIM(COALESCE(away, ''))) = UPPER(TRIM(?)) AND away_score > home_score THEN 1
-        ELSE 0
-      END
-    ) AS wins,
-    SUM(
-      CASE
-        WHEN home_score = away_score THEN 1
-        ELSE 0
-      END
-    ) AS draws,
-    SUM(
-      CASE
-        WHEN UPPER(TRIM(COALESCE(home, ''))) = UPPER(TRIM(?)) AND home_score < away_score THEN 1
-        WHEN UPPER(TRIM(COALESCE(away, ''))) = UPPER(TRIM(?)) AND away_score < home_score THEN 1
-        ELSE 0
-      END
-    ) AS losses,
-    SUM(
-      CASE
-        WHEN UPPER(TRIM(COALESCE(home, ''))) = UPPER(TRIM(?)) THEN home_score
-        WHEN UPPER(TRIM(COALESCE(away, ''))) = UPPER(TRIM(?)) THEN away_score
-        ELSE 0
-      END
-    ) AS goals_for,
-    SUM(
-      CASE
-        WHEN UPPER(TRIM(COALESCE(home, ''))) = UPPER(TRIM(?)) THEN away_score
-        WHEN UPPER(TRIM(COALESCE(away, ''))) = UPPER(TRIM(?)) THEN home_score
-        ELSE 0
-      END
-    ) AS goals_against,
-    SUM(
-      CASE
-        WHEN UPPER(TRIM(COALESCE(home, ''))) = UPPER(TRIM(?)) THEN home_score
-        WHEN UPPER(TRIM(COALESCE(away, ''))) = UPPER(TRIM(?)) THEN away_score
-        ELSE 0
-      END
-    ) -
-    SUM(
-      CASE
-        WHEN UPPER(TRIM(COALESCE(home, ''))) = UPPER(TRIM(?)) THEN away_score
-        WHEN UPPER(TRIM(COALESCE(away, ''))) = UPPER(TRIM(?)) THEN home_score
-        ELSE 0
-      END
-    ) AS goal_diff,
+    SUM(CASE WHEN ($resultExpr) = 'W' THEN 1 ELSE 0 END) AS wins,
+    SUM(CASE WHEN ($resultExpr) = 'D' THEN 1 ELSE 0 END) AS draws,
+    SUM(CASE WHEN ($resultExpr) = 'L' THEN 1 ELSE 0 END) AS losses,
+    SUM($gfExpr) AS goals_for,
+    SUM($gaExpr) AS goals_against,
+    SUM($gfExpr) - SUM($gaExpr) AS goal_diff,
     ROUND(
       (
-        SUM(
-          CASE
-            WHEN UPPER(TRIM(COALESCE(home, ''))) = UPPER(TRIM(?)) AND home_score > away_score THEN 3
-            WHEN UPPER(TRIM(COALESCE(away, ''))) = UPPER(TRIM(?)) AND away_score > home_score THEN 3
-            WHEN home_score = away_score THEN 1
-            ELSE 0
-          END
-        ) * 100.0
+        SUM(CASE WHEN ($resultExpr) = 'W' THEN 3 WHEN ($resultExpr) = 'D' THEN 1 ELSE 0 END) * 100.0
       ) / (COUNT(*) * 3),
       2
     ) AS pct
-  FROM matches
-";
-
-if ($where) {
-  $sql .= " WHERE " . implode(' AND ', $where);
-}
-
-$sql .= "
-  GROUP BY TRIM(COALESCE(stadium, ''))
+  FROM matches m
+  WHERE " . implode(' AND ', $where) . "
+  GROUP BY TRIM(COALESCE(m.stadium, ''))
   ORDER BY {$orderCol} {$orderDir}, stadium ASC
 ";
 
-$queryParams = [
-  $clubName, $clubName,
-  $clubName, $clubName,
-  $clubName, $clubName,
-  $clubName, $clubName,
-  $clubName, $clubName,
-  $clubName, $clubName,
-  $clubName, $clubName,
-];
-$queryParams = array_merge($queryParams, $params);
-
-$rows = q($pdo, $sql, $queryParams)->fetchAll();
+$rows = q($pdo, $sql, $params)->fetchAll();
 
 if (!$rows) {
   echo '  <div class="px-3 pb-3 muted">Sem resultados para os filtros informados.</div>';
@@ -538,21 +450,21 @@ if (!$rows) {
 echo '  <div class="table-responsive">';
 echo '    <table class="table align-middle mb-0">';
 echo '      <thead><tr>
-          <th>' . alm_sort_link('stadium', 'Estádio', $sort, $dir) . '</th>
-          <th class="text-end">' . alm_sort_link('games', 'J', $sort, $dir) . '</th>
-          <th class="text-end">' . alm_sort_link('wins', 'V', $sort, $dir) . '</th>
-          <th class="text-end">' . alm_sort_link('draws', 'E', $sort, $dir) . '</th>
-          <th class="text-end">' . alm_sort_link('losses', 'D', $sort, $dir) . '</th>
-          <th class="text-end">' . alm_sort_link('goals_for', 'GP', $sort, $dir) . '</th>
-          <th class="text-end">' . alm_sort_link('goals_against', 'GC', $sort, $dir) . '</th>
-          <th class="text-end">' . alm_sort_link('goal_diff', 'SG', $sort, $dir) . '</th>
-          <th class="text-end">' . alm_sort_link('pct', '% AP', $sort, $dir) . '</th>
+          <th>' . alm_stad_sort_link('stadium', 'Estádio', $sort, $dir) . '</th>
+          <th class="text-end">' . alm_stad_sort_link('games', 'J', $sort, $dir) . '</th>
+          <th class="text-end">' . alm_stad_sort_link('wins', 'V', $sort, $dir) . '</th>
+          <th class="text-end">' . alm_stad_sort_link('draws', 'E', $sort, $dir) . '</th>
+          <th class="text-end">' . alm_stad_sort_link('losses', 'D', $sort, $dir) . '</th>
+          <th class="text-end">' . alm_stad_sort_link('goals_for', 'GP', $sort, $dir) . '</th>
+          <th class="text-end">' . alm_stad_sort_link('goals_against', 'GC', $sort, $dir) . '</th>
+          <th class="text-end">' . alm_stad_sort_link('goal_diff', 'SG', $sort, $dir) . '</th>
+          <th class="text-end">' . alm_stad_sort_link('pct', '% AP', $sort, $dir) . '</th>
         </tr></thead>';
 echo '      <tbody>';
 
 foreach ($rows as $r) {
   echo '      <tr>';
-  echo '        <td><a href="' . h(alm_build_url(['stadium' => (string)$r['stadium']])) . '">' . h((string)$r['stadium']) . '</a></td>';
+  echo '        <td><a href="' . h(alm_stad_build_url(['stadium' => (string)$r['stadium']])) . '">' . h((string)$r['stadium']) . '</a></td>';
   echo '        <td class="text-end">' . (int)$r['games'] . '</td>';
   echo '        <td class="text-end">' . (int)$r['wins'] . '</td>';
   echo '        <td class="text-end">' . (int)$r['draws'] . '</td>';
@@ -560,7 +472,7 @@ foreach ($rows as $r) {
   echo '        <td class="text-end">' . (int)$r['goals_for'] . '</td>';
   echo '        <td class="text-end">' . (int)$r['goals_against'] . '</td>';
   echo '        <td class="text-end">' . (int)$r['goal_diff'] . '</td>';
-  echo '        <td class="text-end">' . alm_fmt_pct($r['pct']) . '</td>';
+  echo '        <td class="text-end">' . alm_stad_fmt_pct($r['pct']) . '</td>';
   echo '      </tr>';
 }
 
@@ -570,7 +482,3 @@ echo '  </div>';
 echo '</div>';
 
 render_footer();
-
-
-
-
