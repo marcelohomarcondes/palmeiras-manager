@@ -67,7 +67,7 @@ echo '<div class="d-grid gap-2">';
 echo '<a class="btn btn-success" href="index.php?page=create_match">Cadastrar partida</a>';
 echo '<a class="btn btn-outline-primary" href="/?page=players">Gerenciar elenco</a>';
 echo '<a class="btn btn-outline-secondary" href="/?page=stats">Relatórios estatísticos</a>';
-echo '<a class="btn btn-outline-secondary" href="/?page=opponents">Consolidado vs adversários</a>';
+echo '<a class="btn btn-outline-secondary" href="/?page=almanaque">Almanaque</a>';
 echo '</div>';
 // echo '<div class="text-muted small mt-3">Se algo “sumir”, rode novamente: <span class="mono">php src/migrate.php</span></div>';
 echo '</div></div>';
