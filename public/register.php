@@ -43,92 +43,169 @@ if (auth_check()) {
     exit;
 }
 
+/*
+|--------------------------------------------------------------------------
+| Helpers
+|--------------------------------------------------------------------------
+*/
+if (!function_exists('pm_register_create_user_data')) {
+    function pm_register_create_user_data(PDO $pdo, int $userId): void
+    {
+        $pdo->beginTransaction();
+
+        try {
+            $tablesWithUserId = [
+                'players',
+                'academy_players',
+                'academy_dismissed',
+                'matches',
+                'match_player_stats',
+                'match_substitutions',
+                'lineup_templates',
+                'lineup_template_slots',
+                'transfers',
+                'injuries',
+                'trophies',
+                'opponent_players',
+            ];
+
+            foreach ($tablesWithUserId as $table) {
+                try {
+                    $check = $pdo->query("PRAGMA table_info($table)");
+                    $columns = $check ? $check->fetchAll() : [];
+
+                    $hasUserId = false;
+                    foreach ($columns as $column) {
+                        if (($column['name'] ?? '') === 'user_id') {
+                            $hasUserId = true;
+                            break;
+                        }
+                    }
+
+                    if ($hasUserId) {
+                        // Não insere nada. Apenas garante que a tabela existe e suporta user_id.
+                        // O save começa vazio.
+                    }
+                } catch (Throwable $e) {
+                    // ignora tabela inexistente para não quebrar o cadastro
+                }
+            }
+
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+}
+
+if (!function_exists('pm_register_password_error')) {
+    function pm_register_password_error(string $password): string
+    {
+        if (mb_strlen($password) < 8) {
+            return 'A senha deve ter pelo menos 8 caracteres.';
+        }
+
+        if (!preg_match('/[A-Z]/', $password)) {
+            return 'A senha deve conter pelo menos uma letra maiúscula.';
+        }
+
+        if (!preg_match('/[a-z]/', $password)) {
+            return 'A senha deve conter pelo menos uma letra minúscula.';
+        }
+
+        if (!preg_match('/[0-9]/', $password)) {
+            return 'A senha deve conter pelo menos um número.';
+        }
+
+        return '';
+    }
+}
+
+/*
+|--------------------------------------------------------------------------
+| Processamento
+|--------------------------------------------------------------------------
+*/
 $error = '';
 $success = '';
 $usernameValue = '';
-$emailValue = '';
-
-function password_meets_policy(string $password): bool
-{
-    if (auth_mb_strlen($password) < 8) {
-        return false;
-    }
-
-    if (!preg_match('/[A-Za-z]/', $password)) {
-        return false;
-    }
-
-    if (!preg_match('/[0-9]/', $password)) {
-        return false;
-    }
-
-    return true;
-}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $usernameValue = trim((string)($_POST['username'] ?? ''));
-    $emailValue = trim((string)($_POST['email'] ?? ''));
     $password = (string)($_POST['password'] ?? '');
-    $confirmPassword = (string)($_POST['confirm_password'] ?? '');
+    $passwordConfirm = (string)($_POST['password_confirm'] ?? '');
 
-    if ($usernameValue === '' || $emailValue === '' || trim($password) === '' || trim($confirmPassword) === '') {
+    if ($usernameValue === '' || $password === '' || $passwordConfirm === '') {
         $error = 'Preencha todos os campos.';
-    } elseif (!filter_var($emailValue, FILTER_VALIDATE_EMAIL)) {
-        $error = 'Informe um e-mail válido.';
-    } elseif ($password !== $confirmPassword) {
-        $error = 'A confirmação da senha não confere.';
-    } elseif (!password_meets_policy($password)) {
-        $error = 'A senha deve ter pelo menos 8 caracteres, com ao menos 1 letra e 1 número.';
+    } elseif (!preg_match('/^[a-zA-Z0-9_.-]{3,80}$/', $usernameValue)) {
+        $error = 'O usuário deve ter entre 3 e 80 caracteres e usar apenas letras, números, ponto, hífen ou underline.';
     } else {
-        try {
-            $stmt = $pdo->prepare("
-                SELECT id
-                FROM users
-                WHERE lower(username) = :username
-                   OR lower(email) = :email
-                LIMIT 1
-            ");
-            $stmt->execute([
-                ':username' => auth_mb_strtolower($usernameValue),
-                ':email'    => auth_mb_strtolower($emailValue),
-            ]);
+        $passwordError = pm_register_password_error($password);
 
-            $existing = $stmt->fetch();
-
-            if ($existing) {
-                $error = 'Já existe um usuário cadastrado com esse nome ou e-mail.';
-            } else {
-                $passwordHash = auth_create_password_hash($password);
-
-                $insert = $pdo->prepare("
-                    INSERT INTO users (
-                        username,
-                        email,
-                        password_hash,
-                        is_active,
-                        created_at,
-                        updated_at
-                    ) VALUES (
-                        :username,
-                        :email,
-                        :password_hash,
-                        1,
-                        datetime('now'),
-                        datetime('now')
-                    )
+        if ($passwordError !== '') {
+            $error = $passwordError;
+        } elseif ($password !== $passwordConfirm) {
+            $error = 'A confirmação de senha não confere.';
+        } else {
+            try {
+                $stmt = $pdo->prepare("
+                    SELECT id
+                    FROM users
+                    WHERE lower(username) = :username
+                    LIMIT 1
                 ");
-                $insert->execute([
-                    ':username'      => auth_mb_strtolower($usernameValue),
-                    ':email'         => auth_mb_strtolower($emailValue),
-                    ':password_hash' => $passwordHash,
+                $stmt->execute([
+                    ':username' => auth_mb_strtolower($usernameValue),
                 ]);
 
-                $success = 'Usuário criado com sucesso. Agora você já pode entrar no sistema.';
-                $usernameValue = '';
-                $emailValue = '';
+                $existingUser = $stmt->fetch();
+
+                if ($existingUser) {
+                    $error = 'Já existe um usuário com esse nome.';
+                } else {
+                    $passwordHash = password_hash($password, PASSWORD_DEFAULT);
+
+                    $pdo->beginTransaction();
+
+                    $insert = $pdo->prepare("
+                        INSERT INTO users (
+                            username,
+                            password_hash,
+                            is_active,
+                            created_at,
+                            updated_at
+                        ) VALUES (
+                            :username,
+                            :password_hash,
+                            1,
+                            datetime('now'),
+                            datetime('now')
+                        )
+                    ");
+
+                    $insert->execute([
+                        ':username' => $usernameValue,
+                        ':password_hash' => $passwordHash,
+                    ]);
+
+                    $userId = (int)$pdo->lastInsertId();
+
+                    $pdo->commit();
+
+                    pm_register_create_user_data($pdo, $userId);
+
+                    $success = 'Usuário criado com sucesso. Agora você já pode entrar.';
+                    $usernameValue = '';
+                }
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                $error = 'Não foi possível criar o usuário.';
             }
-        } catch (Throwable $e) {
-            $error = 'Não foi possível criar o usuário.';
         }
     }
 }
@@ -151,12 +228,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             --green-dark: #15803d;
             --gray-btn: #374151;
             --gray-btn-dark: #2b3441;
-            --danger: #dc2626;
-            --danger-bg: rgba(220,38,38,0.12);
             --danger-border: rgba(220,38,38,0.35);
-            --success: #bbf7d0;
-            --success-bg: rgba(22,163,74,0.14);
+            --danger-bg: rgba(220,38,38,0.12);
             --success-border: rgba(22,163,74,0.35);
+            --success-bg: rgba(22,163,74,0.14);
             --input-bg: #0b1220;
             --shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
         }
@@ -205,18 +280,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         .logo-badge {
-            width: 74px;
-            height: 74px;
+            width: 96px;
+            height: 96px;
             margin: 0 auto 14px;
-            border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            background: radial-gradient(circle at 30% 30%, #1fd15f 0%, var(--green) 55%, var(--green-dark) 100%);
-            color: #fff;
-            font-size: 30px;
-            font-weight: 700;
-            box-shadow: 0 10px 25px rgba(22, 163, 74, 0.35);
+        }
+
+        .logo-badge img {
+            display: block;
+            max-width: 100%;
+            max-height: 100%;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+            filter: drop-shadow(0 10px 25px rgba(22, 163, 74, 0.28));
         }
 
         .register-title {
@@ -267,13 +346,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             color: var(--text);
         }
 
-        .form-help {
-            margin-top: 6px;
-            font-size: 12px;
-            color: var(--muted);
-            line-height: 1.45;
-        }
-
         .form-control {
             width: 100%;
             height: 46px;
@@ -290,6 +362,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .form-control:focus {
             border-color: rgba(22,163,74,0.65);
             box-shadow: 0 0 0 4px rgba(22,163,74,0.18);
+        }
+
+        .password-hint {
+            margin-top: 8px;
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.45;
         }
 
         .btn-stack {
@@ -322,17 +401,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             color: #fff;
         }
 
-        .btn-primary:hover {
+        .btn-primary:hover,
+        .btn-secondary:hover {
             opacity: 0.96;
         }
 
         .btn-secondary {
             background: linear-gradient(180deg, var(--gray-btn), var(--gray-btn-dark));
             color: #fff;
-        }
-
-        .btn-secondary:hover {
-            opacity: 0.96;
         }
 
         .helper-links {
@@ -372,6 +448,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             .register-title {
                 font-size: 24px;
             }
+
+            .logo-badge {
+                width: 82px;
+                height: 82px;
+            }
         }
     </style>
 </head>
@@ -379,9 +460,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="register-shell">
         <div class="register-card">
             <div class="register-header">
-                <div class="logo-badge">PM</div>
+                <div class="logo-badge">
+                    <img src="/assets/escudos-inst_3.png" alt="Palmeiras Manager">
+                </div>
                 <h1 class="register-title">Criar usuário</h1>
-                <p class="register-subtitle">Cadastre um novo acesso para iniciar um save separado.</p>
             </div>
 
             <div class="register-body">
@@ -408,19 +490,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
 
                     <div class="form-group">
-                        <label for="email">E-mail</label>
-                        <input
-                            type="email"
-                            id="email"
-                            name="email"
-                            class="form-control"
-                            maxlength="190"
-                            value="<?= htmlspecialchars($emailValue, ENT_QUOTES, 'UTF-8') ?>"
-                            required
-                        >
-                    </div>
-
-                    <div class="form-group">
                         <label for="password">Senha</label>
                         <input
                             type="password"
@@ -430,17 +499,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             maxlength="255"
                             required
                         >
-                        <div class="form-help">
-                            Use pelo menos 8 caracteres, com no mínimo 1 letra e 1 número.
+                        <div class="password-hint">
+                            A senha deve ter ao menos 8 caracteres, com letra maiúscula, letra minúscula e número.
                         </div>
                     </div>
 
                     <div class="form-group">
-                        <label for="confirm_password">Confirmar senha</label>
+                        <label for="password_confirm">Confirmar senha</label>
                         <input
                             type="password"
-                            id="confirm_password"
-                            name="confirm_password"
+                            id="password_confirm"
+                            name="password_confirm"
                             class="form-control"
                             maxlength="255"
                             required
@@ -452,10 +521,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <a href="/login.php" class="btn btn-secondary">Voltar para login</a>
                     </div>
                 </form>
-
-                <div class="footer-note">
-                    Cada usuário terá seu próprio save e seus próprios dados.
-                </div>
             </div>
         </div>
     </div>

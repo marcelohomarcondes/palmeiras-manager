@@ -401,17 +401,18 @@ html[data-theme="dark"] .text-warning{color:#fde68a !important;}
   backdrop-filter:blur(12px);
 }
 
-.pm-brand-title{
-  margin:0;
-  font-size:clamp(1.35rem,1.8vw,1.55rem);
-  font-weight:800;
-  line-height:1.1;
+.pm-brand-logo-wrap{
+  display:flex;
+  align-items:center;
+  height:56px;
+  overflow:visible;
 }
 
-.pm-brand-subtitle{
-  margin:.2rem 0 0;
-  color:var(--muted);
-  font-size:.88rem;
+.pm-brand-logo{
+  display:block;
+  height:120px;
+  width:auto;
+  object-fit:contain;
 }
 
 .pillbar{
@@ -531,7 +532,7 @@ select[data-pro-select="1"]{visibility:hidden;position:absolute;pointer-events:n
 
 @media (max-width: 991.98px){
   .pm-topbar{padding:.95rem;}
-  .pm-brand-title{font-size:1.4rem;}
+  .pm-brand-logo{max-height:50px;}
   .topbar-actions{justify-content:flex-start;}
 }
 
@@ -547,7 +548,7 @@ select[data-pro-select="1"]{visibility:hidden;position:absolute;pointer-events:n
 @media (max-width: 991.98px){
   .app-shell{padding-left:12px;padding-right:12px;}
   .pm-topbar{padding:.72rem .8rem;}
-  .pm-brand-subtitle{display:none;}
+  .pm-brand-logo{max-height:42px;}
   .theme-pill,.topbar-user,.topbar-club{min-height:34px;padding:.3rem .58rem;}
   .table td,.table th{padding:.62rem .7rem;}
 }
@@ -599,9 +600,8 @@ select[data-pro-select="1"]{visibility:hidden;position:absolute;pointer-events:n
         echo '<div class="container-fluid app-shell py-4">';
 
         echo '<div class="pm-topbar d-flex align-items-center justify-content-between mb-3 flex-wrap gap-3">';
-        echo '<div>';
-        echo '<h1 class="pm-brand-title">Palmeiras Manager</h1>';
-        echo '<div class="pm-brand-subtitle">Visual padronizado com base na identidade da tela de login</div>';
+        echo '<div class="pm-brand-logo-wrap">';
+        echo '<img src="/assets/palmeiras_manager_full.png" alt="Palmeiras Manager" class="pm-brand-logo">';
         echo '</div>';
 
         echo '<div class="topbar-actions">';
@@ -647,7 +647,7 @@ select[data-pro-select="1"]{visibility:hidden;position:absolute;pointer-events:n
 if (!function_exists('render_footer')) {
     function render_footer(): void
     {
-        $crest = '/assets/escudos-inst_3.png';
+        $crest = '/assets/palmeiras_manager.png';
 
         echo '<div class="text-center text-muted small mt-4">Palmeiras Manager • ' . date('Y') . '</div>';
         echo '<div class="footer-crest"><img src="' . htmlspecialchars($crest, ENT_QUOTES, 'UTF-8') . '" alt="Palmeiras"></div>';

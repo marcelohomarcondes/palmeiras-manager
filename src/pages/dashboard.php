@@ -107,6 +107,16 @@ $troph = (int)scalar(
 
 render_header('Dashboard');
 
+echo '<style>
+.pm-dash-icon{
+  color: var(--accent) !important;
+}
+
+.pm-dash-icon:hover{
+  color: var(--accent) !important;
+}
+</style>';
+
 if ($resetMessage) {
   echo '<div class="alert alert-success" role="alert">' . h($resetMessage) . '</div>';
 }
@@ -130,7 +140,7 @@ foreach ($cards as [$label, $val, $icon, $href]) {
   echo '<div class="card card-soft p-3 h-100">';
   echo '<div class="d-flex align-items-center justify-content-between">';
   echo '<div><div class="text-muted small">' . h($label) . '</div><div class="fs-3 fw-bold">' . (int)$val . '</div></div>';
-  echo '<i class="bi ' . h($icon) . ' fs-2 text-primary"></i>';
+  echo '<i class="bi ' . h($icon) . ' fs-2 pm-dash-icon"></i>';
   echo '</div></div></a></div>';
 }
 echo '</div>';

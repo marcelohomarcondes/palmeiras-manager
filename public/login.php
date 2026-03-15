@@ -148,18 +148,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         .logo-badge {
-            width: 74px;
-            height: 74px;
+            width: 96px;
+            height: 96px;
             margin: 0 auto 14px;
-            border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            background: radial-gradient(circle at 30% 30%, #1fd15f 0%, var(--green) 55%, var(--green-dark) 100%);
-            color: #fff;
-            font-size: 30px;
-            font-weight: 700;
-            box-shadow: 0 10px 25px rgba(22, 163, 74, 0.35);
+        }
+
+        .logo-badge img {
+            display: block;
+            max-width: 100%;
+            max-height: 100%;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+            filter: drop-shadow(0 10px 25px rgba(22, 163, 74, 0.28));
         }
 
         .login-title {
@@ -302,6 +306,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             .login-title {
                 font-size: 24px;
             }
+
+            .logo-badge {
+                width: 82px;
+                height: 82px;
+            }
         }
     </style>
 </head>
@@ -309,7 +318,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="login-shell">
         <div class="login-card">
             <div class="login-header">
-                <div class="logo-badge">PM</div>
+                <div class="logo-badge">
+                    <img src="/assets/escudos-inst_3.png" alt="Palmeiras Manager">
+                </div>
                 <h1 class="login-title">Palmeiras Manager</h1>
                 <p class="login-subtitle">Acesse seu save para continuar a gestão do clube.</p>
             </div>

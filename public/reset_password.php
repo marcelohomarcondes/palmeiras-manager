@@ -43,72 +43,94 @@ if (auth_check()) {
     exit;
 }
 
+/*
+|--------------------------------------------------------------------------
+| Helpers
+|--------------------------------------------------------------------------
+*/
+if (!function_exists('pm_reset_password_error')) {
+    function pm_reset_password_error(string $password): string
+    {
+        if (mb_strlen($password) < 8) {
+            return 'A senha deve ter pelo menos 8 caracteres.';
+        }
+
+        if (!preg_match('/[A-Z]/', $password)) {
+            return 'A senha deve conter pelo menos uma letra maiúscula.';
+        }
+
+        if (!preg_match('/[a-z]/', $password)) {
+            return 'A senha deve conter pelo menos uma letra minúscula.';
+        }
+
+        if (!preg_match('/[0-9]/', $password)) {
+            return 'A senha deve conter pelo menos um número.';
+        }
+
+        return '';
+    }
+}
+
+/*
+|--------------------------------------------------------------------------
+| Processamento
+|--------------------------------------------------------------------------
+*/
 $error = '';
 $success = '';
 $usernameValue = '';
-
-function password_meets_policy(string $password): bool
-{
-    if (auth_mb_strlen($password) < 8) {
-        return false;
-    }
-
-    if (!preg_match('/[A-Za-z]/', $password)) {
-        return false;
-    }
-
-    if (!preg_match('/[0-9]/', $password)) {
-        return false;
-    }
-
-    return true;
-}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $usernameValue = trim((string)($_POST['username'] ?? ''));
     $newPassword = (string)($_POST['new_password'] ?? '');
     $confirmPassword = (string)($_POST['confirm_password'] ?? '');
 
-    if ($usernameValue === '' || trim($newPassword) === '' || trim($confirmPassword) === '') {
+    if ($usernameValue === '' || $newPassword === '' || $confirmPassword === '') {
         $error = 'Preencha todos os campos.';
-    } elseif ($newPassword !== $confirmPassword) {
-        $error = 'A confirmação da senha não confere.';
-    } elseif (!password_meets_policy($newPassword)) {
-        $error = 'A nova senha deve ter pelo menos 8 caracteres, com ao menos 1 letra e 1 número.';
+    } elseif (!preg_match('/^[a-zA-Z0-9_.-]{3,80}$/', $usernameValue)) {
+        $error = 'Informe um usuário válido.';
     } else {
-        $stmt = $pdo->prepare("
-            SELECT id, username, is_active
-            FROM users
-            WHERE lower(username) = :username
-            LIMIT 1
-        ");
-        $stmt->execute([
-            ':username' => auth_mb_strtolower($usernameValue),
-        ]);
+        $passwordError = pm_reset_password_error($newPassword);
 
-        $user = $stmt->fetch();
-
-        if (!$user) {
-            $error = 'Usuário não encontrado.';
-        } elseif ((int)($user['is_active'] ?? 0) !== 1) {
-            $error = 'Este usuário está inativo.';
+        if ($passwordError !== '') {
+            $error = $passwordError;
+        } elseif ($newPassword !== $confirmPassword) {
+            $error = 'A confirmação de senha não confere.';
         } else {
             try {
-                $passwordHash = auth_create_password_hash($newPassword);
-
-                $update = $pdo->prepare("
-                    UPDATE users
-                    SET password_hash = :password_hash,
-                        updated_at = datetime('now')
-                    WHERE id = :id
+                $stmt = $pdo->prepare("
+                    SELECT id, username, is_active
+                    FROM users
+                    WHERE lower(username) = :username
+                    LIMIT 1
                 ");
-                $update->execute([
-                    ':password_hash' => $passwordHash,
-                    ':id' => (int)$user['id'],
+                $stmt->execute([
+                    ':username' => auth_mb_strtolower($usernameValue),
                 ]);
 
-                $success = 'Senha redefinida com sucesso. Agora você já pode entrar no sistema.';
-                $usernameValue = '';
+                $user = $stmt->fetch();
+
+                if (!$user) {
+                    $error = 'Usuário não encontrado.';
+                } elseif ((int)($user['is_active'] ?? 0) !== 1) {
+                    $error = 'Este usuário está inativo.';
+                } else {
+                    $newHash = password_hash($newPassword, PASSWORD_DEFAULT);
+
+                    $update = $pdo->prepare("
+                        UPDATE users
+                        SET password_hash = :password_hash,
+                            updated_at = datetime('now')
+                        WHERE id = :id
+                    ");
+                    $update->execute([
+                        ':password_hash' => $newHash,
+                        ':id' => (int)$user['id'],
+                    ]);
+
+                    $success = 'Senha redefinida com sucesso. Agora você já pode entrar com a nova senha.';
+                    $usernameValue = '';
+                }
             } catch (Throwable $e) {
                 $error = 'Não foi possível redefinir a senha.';
             }
@@ -120,13 +142,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="pt-BR">
 <head>
     <meta charset="utf-8">
-    <title>Resetar senha | Palmeiras Manager</title>
+    <title>Redefinir senha | Palmeiras Manager</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
     <style>
         :root {
-            --bg: #0f172a;
-            --card: #111827;
             --text: #e5e7eb;
             --muted: #9ca3af;
             --border: rgba(255,255,255,0.10);
@@ -134,12 +154,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             --green-dark: #15803d;
             --gray-btn: #374151;
             --gray-btn-dark: #2b3441;
-            --danger: #dc2626;
-            --danger-bg: rgba(220,38,38,0.12);
             --danger-border: rgba(220,38,38,0.35);
-            --success: #bbf7d0;
-            --success-bg: rgba(22,163,74,0.14);
+            --danger-bg: rgba(220,38,38,0.12);
             --success-border: rgba(22,163,74,0.35);
+            --success-bg: rgba(22,163,74,0.14);
             --input-bg: #0b1220;
             --shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
         }
@@ -169,7 +187,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         .reset-shell {
             width: 100%;
-            max-width: 460px;
+            max-width: 480px;
         }
 
         .reset-card {
@@ -188,18 +206,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         .logo-badge {
-            width: 74px;
-            height: 74px;
+            width: 96px;
+            height: 96px;
             margin: 0 auto 14px;
-            border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            background: radial-gradient(circle at 30% 30%, #1fd15f 0%, var(--green) 55%, var(--green-dark) 100%);
-            color: #fff;
-            font-size: 30px;
-            font-weight: 700;
-            box-shadow: 0 10px 25px rgba(22, 163, 74, 0.35);
+        }
+
+        .logo-badge img {
+            display: block;
+            max-width: 100%;
+            max-height: 100%;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+            filter: drop-shadow(0 10px 25px rgba(22, 163, 74, 0.28));
         }
 
         .reset-title {
@@ -235,7 +257,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .alert-success {
             border: 1px solid var(--success-border);
             background: var(--success-bg);
-            color: var(--success);
+            color: #bbf7d0;
         }
 
         .form-group {
@@ -248,13 +270,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             font-size: 14px;
             font-weight: 600;
             color: var(--text);
-        }
-
-        .form-help {
-            margin-top: 6px;
-            font-size: 12px;
-            color: var(--muted);
-            line-height: 1.45;
         }
 
         .form-control {
@@ -273,6 +288,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .form-control:focus {
             border-color: rgba(22,163,74,0.65);
             box-shadow: 0 0 0 4px rgba(22,163,74,0.18);
+        }
+
+        .password-hint {
+            margin-top: 8px;
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.45;
         }
 
         .btn-stack {
@@ -305,33 +327,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             color: #fff;
         }
 
-        .btn-primary:hover {
-            opacity: 0.96;
-        }
-
         .btn-secondary {
             background: linear-gradient(180deg, var(--gray-btn), var(--gray-btn-dark));
             color: #fff;
         }
 
+        .btn-primary:hover,
         .btn-secondary:hover {
             opacity: 0.96;
-        }
-
-        .helper-links {
-            margin-top: 18px;
-            text-align: center;
-            font-size: 13px;
-            color: var(--muted);
-        }
-
-        .helper-links a {
-            color: #86efac;
-            text-decoration: none;
-        }
-
-        .helper-links a:hover {
-            text-decoration: underline;
         }
 
         .footer-note {
@@ -355,6 +358,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             .reset-title {
                 font-size: 24px;
             }
+
+            .logo-badge {
+                width: 82px;
+                height: 82px;
+            }
         }
     </style>
 </head>
@@ -362,9 +370,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="reset-shell">
         <div class="reset-card">
             <div class="reset-header">
-                <div class="logo-badge">PM</div>
+                <div class="logo-badge">
+                    <img src="/assets/escudos-inst_3.png" alt="Palmeiras Manager">
+                </div>
                 <h1 class="reset-title">Redefinir senha</h1>
-                <p class="reset-subtitle">Defina uma nova senha para voltar a acessar seu save.</p>
+                <p class="reset-subtitle">Atualize a senha do usuário mantendo o mesmo padrão visual do projeto.</p>
             </div>
 
             <div class="reset-body">
@@ -400,8 +410,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             maxlength="255"
                             required
                         >
-                        <div class="form-help">
-                            Use pelo menos 8 caracteres, com no mínimo 1 letra e 1 número.
+                        <div class="password-hint">
+                            A senha deve ter ao menos 8 caracteres, com letra maiúscula, letra minúscula e número.
                         </div>
                     </div>
 
@@ -418,13 +428,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
 
                     <div class="btn-stack">
-                        <button type="submit" class="btn btn-primary">Salvar nova senha</button>
+                        <button type="submit" class="btn btn-primary">Redefinir senha</button>
                         <a href="/login.php" class="btn btn-secondary">Voltar para login</a>
                     </div>
                 </form>
 
                 <div class="footer-note">
-                    Após redefinir a senha, entre novamente no sistema.
+                    Após redefinir a senha, utilize a nova credencial para acessar o sistema.
                 </div>
             </div>
         </div>
