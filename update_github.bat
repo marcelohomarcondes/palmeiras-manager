@@ -48,15 +48,6 @@ if errorlevel 1 (
 )
 
 echo.
-echo Sincronizando com o servidor...
-git pull --rebase origin main
-if errorlevel 1 (
-    echo ERRO no pull --rebase.
-    pause
-    exit /b 1
-)
-
-echo.
 echo Adicionando arquivos...
 git add .
 if errorlevel 1 (
@@ -78,6 +69,15 @@ if errorlevel 1 (
     )
 ) else (
     echo Nenhuma alteracao para commit.
+)
+
+echo.
+echo Sincronizando com o servidor...
+git pull --rebase origin main
+if errorlevel 1 (
+    echo ERRO no pull --rebase.
+    pause
+    exit /b 1
 )
 
 echo.
