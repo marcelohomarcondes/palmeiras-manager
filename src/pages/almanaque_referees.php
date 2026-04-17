@@ -1,0 +1,570 @@
+<?php
+declare(strict_types=1);
+
+require_once __DIR__ . '/../db.php';
+
+$pdo    = db();
+$userId = require_user_id();
+$club   = function_exists('app_club') ? (string)app_club() : 'PALMEIRAS';
+
+render_header('Almanaque • Árbitros');
+
+$q        = trim((string)($_GET['q'] ?? ''));
+$season   = trim((string)($_GET['season'] ?? ''));
+$competition = trim((string)($_GET['competition'] ?? ''));
+$referee  = trim((string)($_GET['referee'] ?? ''));
+$sort     = trim((string)($_GET['sort'] ?? 'games'));
+$dir      = strtolower(trim((string)($_GET['dir'] ?? 'desc'))) === 'asc' ? 'asc' : 'desc';
+
+if (!function_exists('table_exists')) {
+  function table_exists(PDO $pdo, string $table): bool {
+    $st = $pdo->prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?");
+    $st->execute([$table]);
+    return (bool)$st->fetchColumn();
+  }
+}
+
+if (!function_exists('table_columns')) {
+  function table_columns(PDO $pdo, string $table): array {
+    $cols = [];
+    $st = $pdo->query("PRAGMA table_info($table)");
+    foreach (($st ? $st->fetchAll(PDO::FETCH_ASSOC) : []) as $r) {
+      $cols[] = (string)($r['name'] ?? '');
+    }
+    return $cols;
+  }
+}
+
+if (!function_exists('table_has_user_id')) {
+  function table_has_user_id(PDO $pdo, string $table): bool {
+    static $cache = [];
+    if (!array_key_exists($table, $cache)) {
+      $cache[$table] = in_array('user_id', table_columns($pdo, $table), true);
+    }
+    return $cache[$table];
+  }
+}
+
+function alm_ref_build_url(array $overrides = []): string {
+  $params = array_merge($_GET, ['page' => 'almanaque_referees'], $overrides);
+  foreach ($params as $k => $v) {
+    if ($v === null || $v === '') unset($params[$k]);
+  }
+  return 'index.php?' . http_build_query($params);
+}
+
+function alm_ref_sort_link(string $column, string $label, string $currentSort, string $currentDir): string {
+  $nextDir = ($currentSort === $column && $currentDir === 'asc') ? 'desc' : 'asc';
+  $arrow = '';
+  if ($currentSort === $column) {
+    $arrow = $currentDir === 'asc' ? ' ▼' : ' ▲';
+  }
+  $url = alm_ref_build_url(['sort' => $column, 'dir' => $nextDir]);
+  return '<a href="' . h($url) . '">' . h($label) . $arrow . '</a>';
+}
+
+function alm_ref_fmt_pct($v): string {
+  return number_format((float)$v, 2, ',', '.') . '%';
+}
+
+function alm_ref_fmt_date_br(?string $date): string {
+  if (!$date) return '-';
+  $ts = strtotime($date);
+  return $ts ? date('d/m/Y', $ts) : h($date);
+}
+
+$matchesHasUserId = table_has_user_id($pdo, 'matches');
+$statsExists      = table_exists($pdo, 'match_player_stats');
+$statsHasUserId   = $statsExists && table_has_user_id($pdo, 'match_player_stats');
+$statsCols        = $statsExists ? table_columns($pdo, 'match_player_stats') : [];
+
+$yellowCol = null;
+foreach (['yellow_cards', 'yellow'] as $c) {
+  if (in_array($c, $statsCols, true)) {
+    $yellowCol = $c;
+    break;
+  }
+}
+$redCol = null;
+foreach (['red_cards', 'red'] as $c) {
+  if (in_array($c, $statsCols, true)) {
+    $redCol = $c;
+    break;
+  }
+}
+$statsHasClubName = in_array('club_name', $statsCols, true);
+
+$clubNorm = "UPPER(TRIM(:club))";
+$homeNorm = "UPPER(TRIM(COALESCE(m.home, '')))";
+$awayNorm = "UPPER(TRIM(COALESCE(m.away, '')))";
+$isClubInMatch = "($homeNorm = $clubNorm OR $awayNorm = $clubNorm)";
+
+$gfExpr = "CASE
+  WHEN $homeNorm = $clubNorm THEN COALESCE(m.home_score, 0)
+  ELSE COALESCE(m.away_score, 0)
+END";
+
+$gaExpr = "CASE
+  WHEN $homeNorm = $clubNorm THEN COALESCE(m.away_score, 0)
+  ELSE COALESCE(m.home_score, 0)
+END";
+
+$resultExpr = "CASE
+  WHEN ($gfExpr) > ($gaExpr) THEN 'W'
+  WHEN ($gfExpr) = ($gaExpr) THEN 'D'
+  ELSE 'L'
+END";
+
+$baseWhere = [
+  $isClubInMatch,
+  "TRIM(COALESCE(m.referee, '')) <> ''",
+];
+$baseParams = [':club' => $club];
+
+if ($matchesHasUserId) {
+  $baseWhere[] = "m.user_id = :user_id";
+  $baseParams[':user_id'] = $userId;
+}
+
+$seasonOptionsSql = "
+  SELECT DISTINCT TRIM(COALESCE(m.season, '')) AS season
+  FROM matches m
+  WHERE " . implode(' AND ', $baseWhere) . "
+    AND TRIM(COALESCE(m.season, '')) <> ''
+  ORDER BY CAST(TRIM(m.season) AS INTEGER) DESC, TRIM(m.season) DESC
+";
+$seasonOptions = q($pdo, $seasonOptionsSql, $baseParams)->fetchAll(PDO::FETCH_COLUMN);
+
+$competitionOptionsSql = "
+  SELECT DISTINCT TRIM(COALESCE(m.competition, '')) AS competition
+  FROM matches m
+  WHERE " . implode(' AND ', $baseWhere) . "
+    AND TRIM(COALESCE(m.competition, '')) <> ''
+  ORDER BY TRIM(m.competition) ASC
+";
+$competitionOptions = q($pdo, $competitionOptionsSql, $baseParams)->fetchAll(PDO::FETCH_COLUMN);
+
+$sortMap = [
+  'referee'       => 'referee',
+  'name'          => 'referee',
+  'games'         => 'games',
+  'wins'          => 'wins',
+  'draws'         => 'draws',
+  'losses'        => 'losses',
+  'goals_for'     => 'goals_for',
+  'goals_against' => 'goals_against',
+  'goal_diff'     => 'goal_diff',
+  'yellow_cards'  => 'yellow_cards',
+  'red_cards'     => 'red_cards',
+  'pct'           => 'pct',
+  'j'             => 'games',
+  'v'             => 'wins',
+  'e'             => 'draws',
+  'd'             => 'losses',
+  'gp'            => 'goals_for',
+  'gc'            => 'goals_against',
+  'sg'            => 'goal_diff',
+  'ca'            => 'yellow_cards',
+  'cv'            => 'red_cards',
+  'ap'            => 'pct',
+];
+
+$orderCol = $sortMap[$sort] ?? 'games';
+$orderDir = strtoupper($dir) === 'ASC' ? 'ASC' : 'DESC';
+
+/*
+|--------------------------------------------------------------------------
+| Função para somar cartões do clube por partida
+|--------------------------------------------------------------------------
+*/
+$cardAggJoin = '';
+$cardSelectSingle = '0 AS yellow_cards, 0 AS red_cards';
+$cardSelectGroup  = '0 AS yellow_cards, 0 AS red_cards';
+
+if ($statsExists && ($yellowCol || $redCol)) {
+  $sumYellow = $yellowCol ? "SUM(COALESCE(s.$yellowCol,0))" : "0";
+  $sumRed    = $redCol ? "SUM(COALESCE(s.$redCol,0))" : "0";
+
+  $cardAggSql = "
+    SELECT
+      s.match_id,
+      $sumYellow AS yellow_cards,
+      $sumRed    AS red_cards
+    FROM match_player_stats s
+  ";
+
+  $cardWhere = [];
+  $cardParamsNeeded = false;
+
+  if ($statsHasUserId) {
+    $cardWhere[] = "s.user_id = :user_id";
+    $cardParamsNeeded = true;
+  }
+
+  if ($statsHasClubName) {
+    $cardWhere[] = "UPPER(TRIM(COALESCE(s.club_name, ''))) = $clubNorm";
+    $cardParamsNeeded = true;
+  }
+
+  if ($cardWhere) {
+    $cardAggSql .= " WHERE " . implode(' AND ', $cardWhere);
+  }
+
+  $cardAggSql .= " GROUP BY s.match_id";
+
+  $cardAggJoin = " LEFT JOIN ($cardAggSql) cards ON cards.match_id = m.id ";
+  $cardSelectSingle = "COALESCE(cards.yellow_cards,0) AS yellow_cards, COALESCE(cards.red_cards,0) AS red_cards";
+  $cardSelectGroup  = "SUM(COALESCE(cards.yellow_cards,0)) AS yellow_cards, SUM(COALESCE(cards.red_cards,0)) AS red_cards";
+}
+
+/*
+|--------------------------------------------------------------------------
+| DETALHE DO ÁRBITRO
+|--------------------------------------------------------------------------
+*/
+if ($referee !== '') {
+  $where = $baseWhere;
+  $params = $baseParams;
+
+  $where[] = "UPPER(TRIM(COALESCE(m.referee, ''))) = UPPER(TRIM(:referee))";
+  $params[':referee'] = $referee;
+
+  if ($season !== '') {
+    $where[] = "UPPER(TRIM(COALESCE(m.season, ''))) = UPPER(TRIM(:season))";
+    $params[':season'] = $season;
+  }
+
+  if ($competition !== '') {
+    $where[] = "UPPER(TRIM(COALESCE(m.competition, ''))) = UPPER(TRIM(:competition))";
+    $params[':competition'] = $competition;
+  }
+
+  $sqlSummary = "
+    SELECT
+      TRIM(COALESCE(m.referee, '')) AS referee,
+      COUNT(*) AS games,
+      SUM(CASE WHEN ($resultExpr) = 'W' THEN 1 ELSE 0 END) AS wins,
+      SUM(CASE WHEN ($resultExpr) = 'D' THEN 1 ELSE 0 END) AS draws,
+      SUM(CASE WHEN ($resultExpr) = 'L' THEN 1 ELSE 0 END) AS losses,
+      SUM($gfExpr) AS goals_for,
+      SUM($gaExpr) AS goals_against,
+      SUM($gfExpr) - SUM($gaExpr) AS goal_diff,
+      $cardSelectGroup,
+      ROUND(
+        (
+          SUM(CASE WHEN ($resultExpr) = 'W' THEN 3 WHEN ($resultExpr) = 'D' THEN 1 ELSE 0 END) * 100.0
+        ) / (COUNT(*) * 3),
+        2
+      ) AS pct
+    FROM matches m
+    $cardAggJoin
+    WHERE " . implode(' AND ', $where) . "
+    GROUP BY TRIM(COALESCE(m.referee, ''))
+  ";
+
+  $summary = q($pdo, $sqlSummary, $params)->fetch();
+
+  echo '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">';
+  echo '  <div>';
+  echo '    <div class="muted">Resumo detalhado do árbitro</div>';
+  echo '    <h3 class="mb-0">' . h($referee) . '</h3>';
+  echo '  </div>';
+  echo '  <div>';
+  echo '    <a class="btn btn-secondary" href="' . h(alm_ref_build_url([
+            'referee' => null,
+            'sort'    => $sort,
+            'dir'     => $dir,
+          ])) . '">Voltar ao consolidado</a>';
+  echo '  </div>';
+  echo '</div>';
+
+  echo '<div class="card-soft mb-3">';
+  echo '  <form method="get" class="p-3">';
+  echo '    <input type="hidden" name="page" value="almanaque_referees">';
+  echo '    <input type="hidden" name="referee" value="' . h($referee) . '">';
+  echo '    <div class="row g-2 align-items-end">';
+  echo '      <div class="col-12 col-md-3">';
+  echo '        <label class="form-label">Temporada</label>';
+  echo '        <select class="form-select" name="season">';
+  echo '          <option value="">Todas</option>';
+  foreach ($seasonOptions as $opt) {
+    $opt = (string)$opt;
+    echo '          <option value="' . h($opt) . '"' . ($season === $opt ? ' selected' : '') . '>' . h($opt) . '</option>';
+  }
+  echo '        </select>';
+  echo '      </div>';
+  echo '      <div class="col-12 col-md-7">';
+  echo '        <label class="form-label">Campeonato</label>';
+  echo '        <select class="form-select" name="competition">';
+  echo '          <option value="">Todos</option>';
+  foreach ($competitionOptions as $opt) {
+    $opt = (string)$opt;
+    echo '          <option value="' . h($opt) . '"' . ($competition === $opt ? ' selected' : '') . '>' . h($opt) . '</option>';
+  }
+  echo '        </select>';
+  echo '      </div>';
+  echo '      <div class="col-12 col-md-1 d-grid">';
+  echo '        <button class="btn btn-primary" type="submit">Aplicar</button>';
+  echo '      </div>';
+  echo '      <div class="col-12 col-md-1 d-grid">';
+  echo '        <a class="btn btn-secondary" href="' . h(alm_ref_build_url([
+            'competition' => null,
+            'season'      => null,
+          ])) . '">Limpar</a>';
+  echo '      </div>';
+  echo '    </div>';
+  echo '  </form>';
+
+  if (!$summary) {
+    echo '  <div class="px-3 pb-3 muted">Nenhuma partida encontrada para este árbitro com os filtros informados.</div>';
+    echo '</div>';
+    render_footer();
+    exit;
+  }
+
+  echo '  <div class="table-responsive">';
+  echo '    <table class="table align-middle mb-0">';
+  echo '      <thead><tr>
+            <th class="text-center">J</th>
+            <th class="text-center">V</th>
+            <th class="text-center">E</th>
+            <th class="text-center">D</th>
+            <th class="text-center">GP</th>
+            <th class="text-center">GC</th>
+            <th class="text-center">SG</th>
+            <th class="text-center">CA</th>
+            <th class="text-center">CV</th>
+            <th class="text-center">% AP</th>
+          </tr></thead>';
+  echo '      <tbody><tr>';
+  echo '        <td class="text-center">' . (int)$summary['games'] . '</td>';
+  echo '        <td class="text-center">' . (int)$summary['wins'] . '</td>';
+  echo '        <td class="text-center">' . (int)$summary['draws'] . '</td>';
+  echo '        <td class="text-center">' . (int)$summary['losses'] . '</td>';
+  echo '        <td class="text-center">' . (int)$summary['goals_for'] . '</td>';
+  echo '        <td class="text-center">' . (int)$summary['goals_against'] . '</td>';
+  echo '        <td class="text-center">' . (int)$summary['goal_diff'] . '</td>';
+  echo '        <td class="text-center">' . (int)$summary['yellow_cards'] . '</td>';
+  echo '        <td class="text-center">' . (int)$summary['red_cards'] . '</td>';
+  echo '        <td class="text-center">' . alm_ref_fmt_pct($summary['pct']) . '</td>';
+  echo '      </tr></tbody>';
+  echo '    </table>';
+  echo '  </div>';
+  echo '</div>';
+
+  $sqlMatches = "
+    SELECT
+      m.id,
+      m.season,
+      m.competition,
+      m.phase,
+      m.round,
+      m.match_date,
+      m.home,
+      m.away,
+      ($gfExpr) AS gf,
+      ($gaExpr) AS ga,
+      ($resultExpr) AS result,
+      $cardSelectSingle
+    FROM matches m
+    $cardAggJoin
+    WHERE " . implode(' AND ', $where) . "
+    ORDER BY date(m.match_date) DESC, m.id DESC
+  ";
+
+  $matches = q($pdo, $sqlMatches, $params)->fetchAll();
+
+  echo '<div class="card-soft">';
+  echo '  <div class="p-3">';
+  echo '    <div class="muted mb-2">Lista de jogos apitados por ' . h($referee) . ' (ordenada por data).</div>';
+  echo '  </div>';
+  echo '  <div class="table-responsive">';
+  echo '    <table class="table align-middle mb-0">';
+  echo '      <thead><tr>
+            <th>Data</th>
+            <th>Temporada</th>
+            <th>Campeonato</th>
+            <th>Fase</th>
+            <th>Rodada</th>
+            <th>Jogo</th>
+            <th class="text-end">GP</th>
+            <th class="text-end">GC</th>
+            <th class="text-center">CA</th>
+            <th class="text-center">CV</th>
+            <th class="text-center">Resultado</th>
+            <th class="text-end">Ações</th>
+          </tr></thead>';
+  echo '      <tbody>';
+
+  foreach ($matches as $m) {
+    $resultado = match ((string)$m['result']) {
+      'W' => 'Vitória',
+      'D' => 'Empate',
+      'L' => 'Derrota',
+      default => '-',
+    };
+
+    echo '      <tr>';
+    echo '        <td>' . alm_ref_fmt_date_br((string)$m['match_date']) . '</td>';
+    echo '        <td>' . h((string)$m['season']) . '</td>';
+    echo '        <td>' . h((string)$m['competition']) . '</td>';
+    echo '        <td>' . h((string)($m['phase'] ?? '-')) . '</td>';
+    echo '        <td>' . h((string)($m['round'] ?? '-')) . '</td>';
+    echo '        <td>' . h((string)$m['home']) . ' x ' . h((string)$m['away']) . '</td>';
+    echo '        <td class="text-end">' . (int)$m['gf'] . '</td>';
+    echo '        <td class="text-end">' . (int)$m['ga'] . '</td>';
+    echo '        <td class="text-center">' . (int)$m['yellow_cards'] . '</td>';
+    echo '        <td class="text-center">' . (int)$m['red_cards'] . '</td>';
+    echo '        <td class="text-center">' . $resultado . '</td>';
+    echo '        <td class="text-end"><a class="btn btn-sm btn-primary" href="index.php?page=match&id=' . (int)$m['id'] . '">Abrir</a></td>';
+    echo '      </tr>';
+  }
+
+  echo '      </tbody>';
+  echo '    </table>';
+  echo '  </div>';
+  echo '</div>';
+
+  render_footer();
+  exit;
+}
+
+/*
+|--------------------------------------------------------------------------
+| CONSOLIDADO
+|--------------------------------------------------------------------------
+*/
+$where = $baseWhere;
+$params = $baseParams;
+
+if ($q !== '') {
+  $where[] = "UPPER(TRIM(COALESCE(m.referee, ''))) LIKE UPPER(TRIM(:q))";
+  $params[':q'] = '%' . $q . '%';
+}
+
+if ($season !== '') {
+  $where[] = "UPPER(TRIM(COALESCE(m.season, ''))) = UPPER(TRIM(:season))";
+  $params[':season'] = $season;
+}
+
+if ($competition !== '') {
+  $where[] = "UPPER(TRIM(COALESCE(m.competition, ''))) = UPPER(TRIM(:competition))";
+  $params[':competition'] = $competition;
+}
+
+echo '<div class="card-soft mb-3">';
+echo '  <form method="get" class="p-3">';
+echo '    <input type="hidden" name="page" value="almanaque_referees">';
+echo '    <div class="muted mb-2">Consolidado automático baseado nos jogos do Palmeiras por árbitro.</div>';
+echo '    <div class="row g-2 align-items-end">';
+echo '      <div class="col-12 col-md-3">';
+echo '        <label class="form-label">Buscar árbitro</label>';
+echo '        <input class="form-control" name="q" placeholder="Buscar árbitro..." value="' . h($q) . '">';
+echo '      </div>';
+echo '      <div class="col-12 col-md-3">';
+echo '        <label class="form-label">Temporada</label>';
+echo '        <select class="form-select" name="season">';
+echo '          <option value="">Todas</option>';
+foreach ($seasonOptions as $opt) {
+  $opt = (string)$opt;
+  echo '          <option value="' . h($opt) . '"' . ($season === $opt ? ' selected' : '') . '>' . h($opt) . '</option>';
+}
+echo '        </select>';
+echo '      </div>';
+echo '      <div class="col-12 col-md-4">';
+echo '        <label class="form-label">Campeonato</label>';
+echo '        <select class="form-select" name="competition">';
+echo '          <option value="">Todos</option>';
+foreach ($competitionOptions as $opt) {
+  $opt = (string)$opt;
+  echo '          <option value="' . h($opt) . '"' . ($competition === $opt ? ' selected' : '') . '>' . h($opt) . '</option>';
+}
+echo '        </select>';
+echo '      </div>';
+echo '      <div class="col-12 col-md-1 d-grid">';
+echo '        <button class="btn btn-primary" type="submit">Aplicar</button>';
+echo '      </div>';
+echo '      <div class="col-12 col-md-1 d-grid">';
+echo '        <a class="btn btn-secondary" href="' . h(alm_ref_build_url([
+          'q'           => null,
+          'competition' => null,
+          'season'      => null,
+          'sort'        => 'games',
+          'dir'         => 'desc',
+        ])) . '">Limpar</a>';
+echo '      </div>';
+echo '    </div>';
+echo '  </form>';
+
+$sql = "
+  SELECT
+    TRIM(COALESCE(m.referee, '')) AS referee,
+    COUNT(*) AS games,
+    SUM(CASE WHEN ($resultExpr) = 'W' THEN 1 ELSE 0 END) AS wins,
+    SUM(CASE WHEN ($resultExpr) = 'D' THEN 1 ELSE 0 END) AS draws,
+    SUM(CASE WHEN ($resultExpr) = 'L' THEN 1 ELSE 0 END) AS losses,
+    SUM($gfExpr) AS goals_for,
+    SUM($gaExpr) AS goals_against,
+    SUM($gfExpr) - SUM($gaExpr) AS goal_diff,
+    $cardSelectGroup,
+    ROUND(
+      (
+        SUM(CASE WHEN ($resultExpr) = 'W' THEN 3 WHEN ($resultExpr) = 'D' THEN 1 ELSE 0 END) * 100.0
+      ) / (COUNT(*) * 3),
+      2
+    ) AS pct
+  FROM matches m
+  $cardAggJoin
+  WHERE " . implode(' AND ', $where) . "
+  GROUP BY TRIM(COALESCE(m.referee, ''))
+  ORDER BY {$orderCol} {$orderDir}, referee ASC
+";
+
+$rows = q($pdo, $sql, $params)->fetchAll();
+
+if (!$rows) {
+  echo '  <div class="px-3 pb-3 muted">Sem resultados para os filtros informados.</div>';
+  echo '</div>';
+  render_footer();
+  exit;
+}
+
+echo '  <div class="table-responsive">';
+echo '    <table class="table align-middle mb-0">';
+echo '      <thead><tr>
+          <th>' . alm_ref_sort_link('referee', 'Árbitro', $sort, $dir) . '</th>
+          <th class="text-end">' . alm_ref_sort_link('games', 'J', $sort, $dir) . '</th>
+          <th class="text-end">' . alm_ref_sort_link('wins', 'V', $sort, $dir) . '</th>
+          <th class="text-end">' . alm_ref_sort_link('draws', 'E', $sort, $dir) . '</th>
+          <th class="text-end">' . alm_ref_sort_link('losses', 'D', $sort, $dir) . '</th>
+          <th class="text-end">' . alm_ref_sort_link('goals_for', 'GP', $sort, $dir) . '</th>
+          <th class="text-end">' . alm_ref_sort_link('goals_against', 'GC', $sort, $dir) . '</th>
+          <th class="text-end">' . alm_ref_sort_link('goal_diff', 'SG', $sort, $dir) . '</th>
+          <th class="text-end">' . alm_ref_sort_link('yellow_cards', 'CA', $sort, $dir) . '</th>
+          <th class="text-end">' . alm_ref_sort_link('red_cards', 'CV', $sort, $dir) . '</th>
+          <th class="text-end">' . alm_ref_sort_link('pct', '% AP', $sort, $dir) . '</th>
+        </tr></thead>';
+echo '      <tbody>';
+
+foreach ($rows as $r) {
+  echo '      <tr>';
+  echo '        <td><a href="' . h(alm_ref_build_url(['referee' => (string)$r['referee']])) . '">' . h((string)$r['referee']) . '</a></td>';
+  echo '        <td class="text-end">' . (int)$r['games'] . '</td>';
+  echo '        <td class="text-end">' . (int)$r['wins'] . '</td>';
+  echo '        <td class="text-end">' . (int)$r['draws'] . '</td>';
+  echo '        <td class="text-end">' . (int)$r['losses'] . '</td>';
+  echo '        <td class="text-end">' . (int)$r['goals_for'] . '</td>';
+  echo '        <td class="text-end">' . (int)$r['goals_against'] . '</td>';
+  echo '        <td class="text-end">' . (int)$r['goal_diff'] . '</td>';
+  echo '        <td class="text-end">' . (int)$r['yellow_cards'] . '</td>';
+  echo '        <td class="text-end">' . (int)$r['red_cards'] . '</td>';
+  echo '        <td class="text-end">' . alm_ref_fmt_pct($r['pct']) . '</td>';
+  echo '      </tr>';
+}
+
+echo '      </tbody>';
+echo '    </table>';
+echo '  </div>';
+echo '</div>';
+
+render_footer();
