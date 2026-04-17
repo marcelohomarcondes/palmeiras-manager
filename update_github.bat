@@ -7,66 +7,84 @@ cd /d "D:\Projetos\palmeiras_manager"
 echo =================================
 echo ATUALIZADOR AUTOMATICO GITHUB
 echo =================================
-
 echo.
-echo Verificando remoto origin...
-git remote get-url origin >nul 2>&1
+
+git rev-parse --is-inside-work-tree >nul 2>&1
 if errorlevel 1 (
-    echo Remote origin nao encontrado. Configurando...
-    git remote add origin https://github.com/marcelohomarcondes/palmeiras-manager.git
-)
-
-echo.
-echo Verificando branch atual...
-for /f %%i in ('git branch --show-current') do set CURRENT_BRANCH=%%i
-
-if "%CURRENT_BRANCH%"=="" (
-    echo Nao foi possivel identificar a branch atual.
+    echo ERRO: pasta atual nao e um repositorio Git.
     pause
     exit /b 1
 )
 
-if /i not "%CURRENT_BRANCH%"=="main" (
-    echo Branch atual: %CURRENT_BRANCH%
-    echo Renomeando branch local para main...
-    git branch -M main
+git remote get-url origin >nul 2>&1
+if errorlevel 1 (
+    echo Configurando remote origin...
+    git remote add origin https://github.com/marcelohomarcondes/palmeiras-manager.git
     if errorlevel 1 (
-        echo Erro ao renomear a branch para main.
+        echo ERRO ao configurar remote origin.
         pause
         exit /b 1
     )
+)
+
+if exist ".git\rebase-merge" (
+    echo ERRO: ha um rebase em andamento. Resolva ou aborte antes de continuar.
+    pause
+    exit /b 1
+)
+
+if exist ".git\rebase-apply" (
+    echo ERRO: ha um rebase em andamento. Resolva ou aborte antes de continuar.
+    pause
+    exit /b 1
+)
+
+echo Garantindo branch main...
+git checkout main
+if errorlevel 1 (
+    echo ERRO ao acessar a branch main.
+    pause
+    exit /b 1
+)
+
+echo.
+echo Sincronizando com o servidor...
+git pull --rebase origin main
+if errorlevel 1 (
+    echo ERRO no pull --rebase.
+    pause
+    exit /b 1
 )
 
 echo.
 echo Adicionando arquivos...
 git add .
 if errorlevel 1 (
-    echo Erro ao adicionar arquivos.
+    echo ERRO ao adicionar arquivos.
     pause
     exit /b 1
 )
 
 echo.
-echo Realizando commit...
-git commit -m "Update automatico em %date% %time%"
+echo Verificando alteracoes...
+git diff --cached --quiet
 if errorlevel 1 (
-    echo Nenhuma alteracao para commit ou ocorreu erro no commit.
+    echo Realizando commit...
+    git commit -m "Update automatico em %date% %time%"
+    if errorlevel 1 (
+        echo ERRO ao realizar commit.
+        pause
+        exit /b 1
+    )
+) else (
+    echo Nenhuma alteracao para commit.
 )
 
 echo.
-echo Sincronizando com o servidor (Pull)...
-git pull origin main --rebase
+echo Enviando para GitHub...
+git push origin main
 if errorlevel 1 (
-    echo Erro no pull. Verifique conflitos ou autenticacao.
-    pause
-    exit /b 1
-)
-
-echo.
-echo Enviando para GitHub (Push)...
-git push -u origin main
-if errorlevel 1 (
-    echo Erro no push. Verifique autenticacao/permissao no GitHub.
+    echo ERRO no push.
     pause
     exit /b 1
 )
